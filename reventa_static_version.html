@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reventa Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/framer-motion/11.0.3/framer-motion.umd.min.js"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
+
+  <script>
+    // Estado
+    let productos = JSON.parse(localStorage.getItem("productosReventa")) || [];
+    let tab = "panel";
+    let editing = null;
+
+    const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
+    let form = { ...emptyForm };
+
+    function saveLS() {
+      localStorage.setItem("productosReventa", JSON.stringify(productos));
+    }
+
+    function setFormField(field, value) {
+      form[field] = value;
+      render();
+    }
+
+    function saveProducto() {
+      if (!form.nombre || !form.precioCompra) return;
+
+      if (editing) {
+        productos = productos.map(p => p.id === editing ? { ...p, ...form, vendido: !!form.precioVenta } : p);
+        editing = null;
+      } else {
+        productos.push({ ...form, id: Date.now(), vendido: !!form.precioVenta });
+      }
+
+      form = { ...emptyForm };
+      saveLS();
+      render();
+    }
+
+    function editProducto(p) {
+      editing = p.id;
+      form = { ...p };
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function renderTabla(lista, incluirPorcentaje = false) {
+      return `
+      <table class="min-w-full bg-white rounded-xl overflow-hidden shadow">
+        <thead class="bg-gray-200">
+          <tr>
+            <th class="p-2">Producto</th>
+            <th class="p-2">Fecha compra</th>
+            <th class="p-2">Precio compra</th>
+            <th class="p-2">Precio venta</th>
+            <th class="p-2">Fecha venta</th>
+            <th class="p-2">Vendido</th>
+            <th class="p-2">Beneficio</th>
+            ${incluirPorcentaje ? `<th class="p-2">% Beneficio</th>` : ""}
+            <th class="p-2">Notas</th>
+            <th class="p-2">Editar</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${lista.map(p => {
+            const compra = parseFloat(p.precioCompra);
+            const venta = parseFloat(p.precioVenta) || 0;
+            const beneficio = venta - compra;
+            let porcentaje = p.vendido ? ((beneficio / compra) * 100).toFixed(1) : ((-compra / compra) * 100).toFixed(1);
+
+            return `
+              <tr class="${p.vendido ? 'bg-green-100' : ''}">
+                <td class="border p-2">${p.nombre}</td>
+                <td class="border p-2">${p.fecha || '-'}</td>
+                <td class="border p-2">€ ${p.precioCompra}</td>
+                <td class="border p-2">${p.precioVenta ? '€ ' + p.precioVenta : '-'}</td>
+                <td class="border p-2">${p.fechaVenta || '-'}</td>
+                <td class="border p-2">${p.vendido ? 'Sí' : 'No'}</td>
+                <td class="border p-2">${beneficio} €</td>
+                ${ incluirPorcentaje ? `<td class="border p-2">${porcentaje}%</td>` : '' }
+                <td class="border p-2">${p.notas || '-'}</td>
+                <td class="border p-2"><button class="bg-blue-500 text-white px-2 py-1 rounded" onclick='editProducto(${JSON.stringify(p)})'>Editar</button></td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>`;
+    }
+
+    function render() {
+      const invertido = productos.reduce((acc, p) => acc + parseFloat(p.precioCompra), 0);
+      const vendidos = productos.filter(p => p.vendido).length;
+      const beneficioTotal = productos.reduce((acc, p) => acc + ((parseFloat(p.precioVenta) || 0) - parseFloat(p.precioCompra)), 0);
+      const stock = productos.filter(p => !p.vendido).length;
+      const valorSinVender = productos.filter(p => !p.vendido).reduce((acc, p) => acc + parseFloat(p.valorVenta || 0), 0);
+
+      document.getElementById("app").innerHTML = `
+        <h1 class="text-3xl font-bold text-center">Seguimiento de Reventa</h1>
+
+        <div class="flex gap-4 justify-center">
+          <button onclick="tab='panel'; render()" class="px-4 py-2 bg-gray-300 rounded">Panel</button>
+          <button onclick="tab='productos'; render()" class="px-4 py-2 bg-gray-300 rounded">Mis Productos</button>
+          <button onclick="tab='estadisticas'; render()" class="px-4 py-2 bg-gray-300 rounded">Estadísticas</button>
+        </div>
+
+        <!-- FORM SOLO EN PANEL -->
+        ${tab === "panel" ? `
+        <div class="bg-white shadow rounded-xl p-4 grid grid-cols-1 md:grid-cols-7 gap-4">
+          <input class="border p-2 rounded" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
+          <input class="border p-2 rounded" placeholder="Precio compra" type="number" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
+          <input class="border p-2 rounded" placeholder="Precio venta" type="number" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
+          <input class="border p-2 rounded" placeholder="Valor venta" type="number" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
+          <input class="border p-2 rounded" placeholder="Fecha compra" type="date" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
+          <input class="border p-2 rounded" placeholder="Fecha venta" type="date" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
+          <input class="border p-2 rounded" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
+
+          <button class="w-full md:col-span-7 bg-blue-600 text-white rounded py-2" onclick="saveProducto()">${editing ? "Guardar cambios" : "Añadir"}</button>
+        </div>` : ""}
+
+        ${tab === "panel" ? `
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mt-4">
+          <div class="bg-white shadow p-4 rounded"><h2 class="text-xl">Invertido</h2><p class="text-2xl font-bold">€ ${invertido.toFixed(2)}</p></div>
+          <div class="bg-white shadow p-4 rounded"><h2 class="text-xl">Vendidos</h2><p class="text-2xl font-bold">${vendidos}</p></div>
+          <div class="bg-white shadow p-4 rounded"><h2 class="text-xl">Beneficio total</h2><p class="text-2xl font-bold">€ ${beneficioTotal.toFixed(2)}</p></div>
+          <div class="bg-white shadow p-4 rounded"><h2 class="text-xl">Stock</h2><p class="text-2xl font-bold">${stock}</p></div>
+          <div class="bg-white shadow p-4 rounded"><h2 class="text-xl">Valor sin vender</h2><p class="text-2xl font-bold">€ ${valorSinVender.toFixed(2)}</p></div>
+        </div>
+
+        <div class="mt-4">${renderTabla(productos)}</div>
+        ` : ""}
+
+
+        ${tab === "productos" ? renderTabla(productos, true) : ""}
+
+        ${tab === "estadisticas" ? `
+        <div class="space-y-4">
+          <div class="bg-white p-4 shadow rounded"><h2 class="text-xl">Producto con más beneficio</h2>
+            <p>${productos.length ? productos.sort((a,b)=>((b.precioVenta||0)-b.precioCompra)-((a.precioVenta||0)-a.precioCompra))[0].nombre : '-'}</p></div>
+
+          <div class="bg-white p-4 shadow rounded">
+            <h2 class="text-xl">Velocidad de venta</h2>
+            ${productos.filter(p => p.vendido && p.fecha && p.fechaVenta).length ? (() => {
+              const vendidos = productos.filter(p => p.vendido && p.fecha && p.fechaVenta).map(p => {
+                const dias = Math.ceil((new Date(p.fechaVenta) - new Date(p.fecha)) / 86400000);
+                return { ...p, dias };
+              });
+              const masRap = vendidos.reduce((a,b)=> a.dias<b.dias?a:b);
+              const masLen = vendidos.reduce((a,b)=> a.dias>b.dias?a:b);
+              return `<p><strong>Más rápido:</strong> ${masRap.nombre} (${masRap.dias} días)</p><p><strong>Más lento:</strong> ${masLen.nombre} (${masLen.dias} días)</p>`;
+            })() : '<p>No hay datos suficientes</p>'}
+          </div>
+        </div>` : ""}
+      `;
+    }
+
+    render();
+  </script>
+</body>
+</html>
