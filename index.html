@@ -9,8 +9,7 @@
 </head>
 <body class="bg-gray-100 p-6">
   <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
-
-  <script>
+  <div id="form-container"></div> <script>
     // Estado
     let productos = JSON.parse(localStorage.getItem("productosReventa")) || [];
     let tab = "panel";
@@ -25,28 +24,51 @@
 
     function setFormField(field, value) {
       form[field] = value;
-      render();
+      // No llamamos a render() aquí para evitar el re-renderizado completo del DOM y la pérdida de foco
+    }
+
+    // Función auxiliar para normalizar la entrada de precios (coma a punto)
+    function normalizePrice(priceString) {
+      if (!priceString) return "";
+      // Reemplaza coma por punto y solo acepta números y un único punto
+      return priceString.replace(/,/g, '.').replace(/[^\d.]/g, '');
     }
 
     function saveProducto() {
       if (!form.nombre || !form.precioCompra) return;
 
+      // Normalizar los campos de precio antes de guardar
+      const productoToSave = {
+        ...form,
+        // Convertir a cadena con punto para guardarla de forma consistente
+        precioCompra: normalizePrice(form.precioCompra),
+        precioVenta: normalizePrice(form.precioVenta),
+        valorVenta: normalizePrice(form.valorVenta),
+      };
+      
+      // Comprobación de que el precio de compra sea un número válido
+      if (isNaN(parseFloat(productoToSave.precioCompra))) return;
+
       if (editing) {
-        productos = productos.map(p => p.id === editing ? { ...p, ...form, vendido: !!form.precioVenta } : p);
+        productos = productos.map(p => p.id === editing ? { ...p, ...productoToSave, vendido: !!productoToSave.precioVenta } : p);
         editing = null;
       } else {
-        productos.push({ ...form, id: Date.now(), vendido: !!form.precioVenta });
+        productos.push({ ...productoToSave, id: Date.now(), vendido: !!productoToSave.precioVenta });
       }
 
       form = { ...emptyForm };
       saveLS();
+      // Después de guardar, necesitamos re-renderizar todo
       render();
+      renderForm(); // Y re-renderizar el formulario
     }
 
     function editProducto(p) {
       editing = p.id;
-      form = { ...p };
-      render();
+      // Los precios pueden tener punto en el estado, los convertimos a coma para la edición si se desea, 
+      // pero para simplificar, se muestran como están (con punto) y se normalizan al guardar.
+      form = { ...p }; 
+      renderForm(); // Re-renderizar el formulario para cargar los datos
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -69,21 +91,31 @@
         </thead>
         <tbody>
           ${lista.map(p => {
+            // Usamos parseFloat para los cálculos, asumiendo que los valores guardados son cadenas con punto
             const compra = parseFloat(p.precioCompra);
             const venta = parseFloat(p.precioVenta) || 0;
             const beneficio = venta - compra;
-            let porcentaje = p.vendido ? ((beneficio / compra) * 100).toFixed(1) : ((-compra / compra) * 100).toFixed(1);
+            // Corregido el cálculo del porcentaje para no vendidos: 
+            // no vendidos no deberían tener un porcentaje de beneficio calculado sobre una venta
+            let porcentaje = p.vendido ? ((beneficio / compra) * 100).toFixed(1) : 'N/A';
+            // Formatear los precios para la tabla con 2 decimales y coma como separador de miles si aplica
+            const formatPrice = (price) => {
+              const num = parseFloat(price);
+              if (isNaN(num)) return '-';
+              return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            };
+
 
             return `
               <tr class="${p.vendido ? 'bg-green-100' : ''}">
                 <td class="border p-2">${p.nombre}</td>
                 <td class="border p-2">${p.fecha || '-'}</td>
-                <td class="border p-2">€ ${p.precioCompra}</td>
-                <td class="border p-2">${p.precioVenta ? '€ ' + p.precioVenta : '-'}</td>
+                <td class="border p-2">€ ${formatPrice(p.precioCompra)}</td>
+                <td class="border p-2">${p.precioVenta ? '€ ' + formatPrice(p.precioVenta) : '-'}</td>
                 <td class="border p-2">${p.fechaVenta || '-'}</td>
                 <td class="border p-2">${p.vendido ? 'Sí' : 'No'}</td>
-                <td class="border p-2">${beneficio} €</td>
-                ${ incluirPorcentaje ? `<td class="border p-2">${porcentaje}%</td>` : '' }
+                <td class="border p-2">${beneficio.toFixed(2)} €</td>
+                ${ incluirPorcentaje ? `<td class="border p-2">${porcentaje === 'N/A' ? 'N/A' : porcentaje + '%'}</td>` : '' }
                 <td class="border p-2">${p.notas || '-'}</td>
                 <td class="border p-2"><button class="bg-blue-500 text-white px-2 py-1 rounded" onclick='editProducto(${JSON.stringify(p)})'>Editar</button></td>
               </tr>
@@ -93,35 +125,42 @@
       </table>`;
     }
 
-    function render() {
-      const invertido = productos.reduce((acc, p) => acc + parseFloat(p.precioCompra), 0);
-      const vendidos = productos.filter(p => p.vendido).length;
-      const beneficioTotal = productos.reduce((acc, p) => acc + ((parseFloat(p.precioVenta) || 0) - parseFloat(p.precioCompra)), 0);
-      const stock = productos.filter(p => !p.vendido).length;
-      const valorSinVender = productos.filter(p => !p.vendido).reduce((acc, p) => acc + parseFloat(p.valorVenta || 0), 0);
-
-      document.getElementById("app").innerHTML = `
-        <h1 class="text-3xl font-bold text-center">Seguimiento de Reventa</h1>
-
-        <div class="flex gap-4 justify-center">
-          <button onclick="tab='panel'; render()" class="px-4 py-2 bg-gray-300 rounded">Panel</button>
-          <button onclick="tab='productos'; render()" class="px-4 py-2 bg-gray-300 rounded">Mis Productos</button>
-          <button onclick="tab='estadisticas'; render()" class="px-4 py-2 bg-gray-300 rounded">Estadísticas</button>
-        </div>
-
-        <!-- FORM SOLO EN PANEL -->
-        ${tab === "panel" ? `
-        <div class="bg-white shadow rounded-xl p-4 grid grid-cols-1 md:grid-cols-7 gap-4">
+    // Función para renderizar solo el formulario
+    function renderForm() {
+      // Solo renderizamos el formulario si estamos en la pestaña "panel"
+      const formHTML = tab === "panel" ? `
+        <div id="resale-form" class="bg-white shadow rounded-xl p-4 grid grid-cols-1 md:grid-cols-7 gap-4 mb-6">
           <input class="border p-2 rounded" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
-          <input class="border p-2 rounded" placeholder="Precio compra" type="number" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
-          <input class="border p-2 rounded" placeholder="Precio venta" type="number" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
-          <input class="border p-2 rounded" placeholder="Valor venta" type="number" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
+          <input class="border p-2 rounded" placeholder="Precio compra" type="text" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
+          <input class="border p-2 rounded" placeholder="Precio venta" type="text" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
+          <input class="border p-2 rounded" placeholder="Valor venta" type="text" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
           <input class="border p-2 rounded" placeholder="Fecha compra" type="date" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
           <input class="border p-2 rounded" placeholder="Fecha venta" type="date" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
           <input class="border p-2 rounded" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
 
           <button class="w-full md:col-span-7 bg-blue-600 text-white rounded py-2" onclick="saveProducto()">${editing ? "Guardar cambios" : "Añadir"}</button>
-        </div>` : ""}
+        </div>` : "";
+        
+      document.getElementById("form-container").innerHTML = formHTML;
+    }
+
+
+    function render() {
+      const invertido = productos.reduce((acc, p) => acc + parseFloat(p.precioCompra || 0), 0);
+      const vendidos = productos.filter(p => p.vendido).length;
+      const beneficioTotal = productos.reduce((acc, p) => acc + ((parseFloat(p.precioVenta || 0) || 0) - parseFloat(p.precioCompra || 0)), 0);
+      const stock = productos.filter(p => !p.vendido).length;
+      const valorSinVender = productos.filter(p => !p.vendido).reduce((acc, p) => acc + parseFloat(p.valorVenta || 0), 0);
+      
+      // La variable para la app ahora solo contiene el título, pestañas y el contenido dinámico
+      document.getElementById("app").innerHTML = `
+        <h1 class="text-3xl font-bold text-center">Seguimiento de Reventa</h1>
+
+        <div class="flex gap-4 justify-center">
+          <button onclick="tab='panel'; render(); renderForm()" class="px-4 py-2 ${tab === 'panel' ? 'bg-blue-500 text-white' : 'bg-gray-300'} rounded">Panel</button>
+          <button onclick="tab='productos'; render(); renderForm()" class="px-4 py-2 ${tab === 'productos' ? 'bg-blue-500 text-white' : 'bg-gray-300'} rounded">Mis Productos</button>
+          <button onclick="tab='estadisticas'; render(); renderForm()" class="px-4 py-2 ${tab === 'estadisticas' ? 'bg-blue-500 text-white' : 'bg-gray-300'} rounded">Estadísticas</button>
+        </div>
 
         ${tab === "panel" ? `
         <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mt-4">
@@ -141,7 +180,7 @@
         ${tab === "estadisticas" ? `
         <div class="space-y-4">
           <div class="bg-white p-4 shadow rounded"><h2 class="text-xl">Producto con más beneficio</h2>
-            <p>${productos.length ? productos.sort((a,b)=>((b.precioVenta||0)-b.precioCompra)-((a.precioVenta||0)-a.precioCompra))[0].nombre : '-'}</p></div>
+            <p>${productos.length ? productos.sort((a,b)=>((parseFloat(b.precioVenta)||0)-parseFloat(b.precioCompra))-((parseFloat(a.precioVenta)||0)-parseFloat(a.precioCompra)))[0].nombre : '-'}</p></div>
 
           <div class="bg-white p-4 shadow rounded">
             <h2 class="text-xl">Velocidad de venta</h2>
@@ -159,7 +198,8 @@
       `;
     }
 
-    render();
+    renderForm(); // Renderizar el formulario inicialmente
+    render(); // Renderizar el resto de la aplicación inicialmente
   </script>
 </body>
 </html>
