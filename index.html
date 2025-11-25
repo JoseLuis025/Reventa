@@ -3,202 +3,297 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reventa Tracker</title>
+  <title>Reventa Tracker - Sincronizado en la Nube</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/framer-motion/11.0.3/framer-motion.umd.min.js"></script>
+
+  <!-- 1. INCLUIR LIBRERÍAS DE FIREBASE (Versiones UMD para HTML estático) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <style>
+    /* Estilo básico para asegurar que Tailwind funcione y centrar la app */
+    body {
+        font-family: 'Inter', sans-serif;
+    }
+    /* Estilo para ocultar el formulario mientras se carga Firebase */
+    #form-container { opacity: 0; transition: opacity 0.5s; }
+    .loaded #form-container { opacity: 1; }
+  </style>
 </head>
-<body class="bg-gray-100 p-6">
+<body class="bg-gray-100 p-6 rounded-xl">
   <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
   <div id="form-container" class="max-w-6xl mx-auto"></div> 
 
   <script>
-    // Estado
-    let productos = JSON.parse(localStorage.getItem("productosReventa")) || [];
+    // =================================================================
+    // CONFIGURACIÓN DE FIREBASE Y CONEXIÓN
+    // Esta configuración usa las claves que proporcionaste:
+    // =================================================================
+    const firebaseConfig = {
+        apiKey: "AIzaSyDjTf3MR6Hn6G5igOQocjLb2cW6kogaeM4",
+        authDomain: "reventa-de8be.firebaseapp.com",
+        projectId: "reventa-de8be",
+        storageBucket: "reventa-de8be.firebasestorage.app",
+        messagingSenderId: "396010674100",
+        appId: "1:396010674100:web:28532dafe6f223969404e1"
+    };
+
+    // Declaramos 'db' y 'COLLECTION_NAME' globalmente (fuera del try/catch)
+    let db; 
+    let COLLECTION_NAME = "productosReventa";
+
+    // Inicializar Firebase y Firestore
+    try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore(); // Ahora se asigna a la variable global 'db'
+    } catch (error) {
+        console.error("Error al inicializar Firebase: ", error);
+        alert("Error de conexión a Firebase. Verifica que las claves son correctas y Firestore está habilitado.");
+    }
+
+
+    // =================================================================
+    // ESTADO LOCAL DE LA APLICACIÓN
+    // =================================================================
+    let productos = [];
     let tab = "panel";
     let editing = null;
 
     const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
     let form = { ...emptyForm };
-
-    function saveLS() {
-      localStorage.setItem("productosReventa", JSON.stringify(productos));
-    }
-
-    // AHORA: Esta función SOLO actualiza el estado. NO llama a render().
+    
+    // Función para actualizar el formulario (sin llamar a render() para no perder el foco)
     function setFormField(field, value) {
       form[field] = value;
-      // Ya NO llamamos a render(), lo que soluciona la pérdida de foco.
-      // El navegador se encargará de mostrar lo que se escribe en el input.
     }
 
-    // Función auxiliar para normalizar la entrada de precios (coma a punto)
+    // Normalizar precios: permite coma/punto al escribir, guarda con punto
     function normalizePrice(priceString) {
       if (!priceString) return "";
-      // Permite números, comas y puntos. Luego reemplaza comas por puntos.
       return priceString.toString().replace(/,/g, '.').replace(/[^\d.]/g, '');
-    }
-
-    function saveProducto() {
-      // 1. Validar y normalizar los datos del formulario antes de guardar.
-      const productoToSave = {
-        ...form,
-        // Convertir a cadena con punto para guardarla de forma consistente
-        precioCompra: normalizePrice(form.precioCompra),
-        precioVenta: normalizePrice(form.precioVenta),
-        valorVenta: normalizePrice(form.valorVenta),
-      };
-
-      if (!productoToSave.nombre || !productoToSave.precioCompra || isNaN(parseFloat(productoToSave.precioCompra))) return;
-
-      // 2. Guardar o actualizar el producto.
-      if (editing) {
-        productos = productos.map(p => p.id === editing ? { ...p, ...productoToSave, vendido: !!productoToSave.precioVenta } : p);
-        editing = null;
-      } else {
-        productos.push({ ...productoToSave, id: Date.now(), vendido: !!productoToSave.precioVenta });
-      }
-
-      // 3. Resetear el formulario, guardar en LS y re-renderizar.
-      form = { ...emptyForm };
-      saveLS();
-      // Re-renderizamos toda la UI después de guardar, no durante la escritura.
-      renderForm(); 
-      render(); 
-    }
-
-    function editProducto(p) {
-      editing = p.id;
-      // Usamos el valor guardado (con punto) en el formulario de edición.
-      form = { ...p }; 
-      renderForm(); 
-      window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
     // Formatea un número para mostrarlo con coma como separador decimal (ej. 148,10)
     const formatPriceDisplay = (priceString) => {
         const num = parseFloat(priceString);
         if (isNaN(num)) return '-';
-        // Usamos es-ES para el formato con coma
         return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
-    function renderTabla(lista, incluirPorcentaje = false) {
-      return `
-      <div class="overflow-x-auto">
-        <table class="min-w-full bg-white rounded-xl shadow">
-          <thead class="bg-gray-200">
-            <tr>
-              <th class="p-2 text-left">Producto</th>
-              <th class="p-2 text-left">Fecha compra</th>
-              <th class="p-2 text-right">Precio compra</th>
-              <th class="p-2 text-right">Precio venta</th>
-              <th class="p-2 text-left">Fecha venta</th>
-              <th class="p-2">Vendido</th>
-              <th class="p-2 text-right">Beneficio</th>
-              ${incluirPorcentaje ? `<th class="p-2 text-right">% Beneficio</th>` : ""}
-              <th class="p-2 text-left">Notas</th>
-              <th class="p-2">Editar</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${lista.map(p => {
-              const compra = parseFloat(p.precioCompra || 0);
-              const venta = parseFloat(p.precioVenta || 0);
-              const beneficio = venta - compra;
-              let porcentaje = 'N/A';
-              if (p.vendido && compra !== 0) {
-                 porcentaje = ((beneficio / compra) * 100).toFixed(1);
-              }
+    // =================================================================
+    // LÓGICA DE CARGA Y GUARDADO (USANDO FIRESTORE)
+    // =================================================================
 
-              return `
-                <tr class="${p.vendido ? 'bg-green-100' : 'hover:bg-red-50'}">
-                  <td class="border p-2">${p.nombre}</td>
-                  <td class="border p-2">${p.fecha || '-'}</td>
-                  <td class="border p-2 text-right">€ ${formatPriceDisplay(p.precioCompra)}</td>
-                  <td class="border p-2 text-right">${p.precioVenta ? '€ ' + formatPriceDisplay(p.precioVenta) : '-'}</td>
-                  <td class="border p-2">${p.fechaVenta || '-'}</td>
-                  <td class="border p-2 text-center">${p.vendido ? 'Sí' : 'No'}</td>
-                  <td class="border p-2 text-right">${beneficio.toFixed(2).replace('.', ',')} €</td>
-                  ${ incluirPorcentaje ? `<td class="border p-2 text-right">${porcentaje === 'N/A' ? 'N/A' : porcentaje + '%'}</td>` : '' }
-                  <td class="border p-2">${p.notas || '-'}</td>
-                  <td class="border p-2 text-center"><button class="bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 transition" onclick='editProducto(${JSON.stringify(p)})'>Editar</button></td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>`;
+    // Función principal para cargar datos desde Firestore
+    async function loadProductos() {
+      if (!db) return; // Añadir verificación por si la inicialización falló
+
+      try {
+        // 'db' y 'COLLECTION_NAME' ahora están en el ámbito correcto
+        const snapshot = await db.collection(COLLECTION_NAME).get();
+        
+        // Mapeamos los documentos de Firestore al array local
+        productos = snapshot.docs.map(doc => ({ 
+          id: doc.id, // Guardamos el ID de Firestore para poder editar/eliminar
+          ...doc.data(),
+          // Aseguramos que los campos de precio sean cadenas o números
+          precioCompra: doc.data().precioCompra || "",
+          precioVenta: doc.data().precioVenta || "",
+          valorVenta: doc.data().valorVenta || ""
+        }));
+
+        // Una vez cargado, mostramos la interfaz y renderizamos
+        document.body.classList.add('loaded');
+        renderForm();
+        render();
+
+      } catch (error) {
+        console.error("Error al cargar productos desde Firestore: ", error);
+        // Podría ser un error de permisos o de conexión
+        alert("Error al conectar con la base de datos. ¿Has publicado las Reglas de Seguridad?");
+      }
     }
+
+    async function saveProducto() {
+      if (!db) return; // Añadir verificación por si la inicialización falló
+
+      // 1. Normalizar y validar
+      const precioCompraNormalizado = normalizePrice(form.precioCompra);
+
+      const productoToSave = {
+        ...form,
+        precioCompra: precioCompraNormalizado,
+        precioVenta: normalizePrice(form.precioVenta),
+        valorVenta: normalizePrice(form.valorVenta),
+      };
+
+      if (!productoToSave.nombre || isNaN(parseFloat(precioCompraNormalizado))) {
+        alert("Debes rellenar el nombre y el precio de compra con un número válido.");
+        return;
+      }
+      
+      // Determinar si el producto está vendido
+      const isVendido = !!productoToSave.precioVenta;
+      const dataToSave = { ...productoToSave, vendido: isVendido, updatedAt: new Date() };
+
+      try {
+        if (editing) {
+          // Si estamos editando, actualizamos el documento por su ID
+          await db.collection(COLLECTION_NAME).doc(editing).update(dataToSave);
+          editing = null;
+        } else {
+          // Si es un producto nuevo, lo añadimos
+          await db.collection(COLLECTION_NAME).add(dataToSave);
+        }
+
+        // 2. Resetear el formulario y recargar los datos de la nube
+        form = { ...emptyForm };
+        await loadProductos(); // Esto actualiza la UI con los datos sincronizados
+        renderForm(); 
+
+      } catch (error) {
+        console.error("Error al guardar producto en Firestore:", error);
+        alert("Hubo un error al guardar los datos en la nube. Revisa la consola para más detalles.");
+      }
+    }
+
+    // Carga los datos de un producto en el formulario para editar
+    function editProducto(p) {
+      editing = p.id;
+      // Usamos los valores tal como están guardados 
+      form = { ...p }; 
+      renderForm(); 
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    // =================================================================
+    // RENDERIZADO DE LA UI
+    // =================================================================
 
     // Función para renderizar solo el formulario
     function renderForm() {
-      // Usamos los valores actuales del estado 'form' para precargar los inputs.
       const formHTML = tab === "panel" ? `
-        <div id="resale-form" class="bg-white shadow rounded-xl p-4 grid grid-cols-1 md:grid-cols-7 gap-4 mb-6">
-          <input class="border p-2 rounded" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
-          
-          <input class="border p-2 rounded" placeholder="Precio compra (€)" type="text" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
-          <input class="border p-2 rounded" placeholder="Precio venta (€)" type="text" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
-          <input class="border p-2 rounded" placeholder="Valor venta (€)" type="text" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
-          
-          <input class="border p-2 rounded" placeholder="Fecha compra" type="date" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
-          <input class="border p-2 rounded" placeholder="Fecha venta" type="date" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
-          <input class="border p-2 rounded md:col-span-2" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
+        <div id="resale-form" class="bg-white shadow-lg rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-4 mb-6 transition transform hover:scale-[1.01] duration-300">
+          <input class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
+          <input class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Precio compra (€)" type="text" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
+          <input class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Precio venta (€)" type="text" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
+          <input class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Valor venta (€)" type="text" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
+          <input class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Fecha compra" type="date" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
+          <input class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Fecha venta" type="date" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
+          <input class="border border-gray-300 p-2 rounded-lg md:col-span-2 focus:ring-blue-500 focus:border-blue-500 transition" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
 
-          <button class="w-full md:col-span-7 bg-blue-600 text-white rounded py-2 hover:bg-blue-700 transition" onclick="saveProducto()">${editing ? "Guardar cambios" : "Añadir producto"}</button>
+          <button class="w-full md:col-span-7 bg-blue-600 text-white font-semibold rounded-lg py-3 hover:bg-blue-700 transition transform hover:scale-[1.02] shadow-md" onclick="saveProducto()">${editing ? "💾 Guardar cambios" : "➕ Añadir producto"}</button>
         </div>` : "";
         
       document.getElementById("form-container").innerHTML = formHTML;
     }
 
-
+    // Función para renderizar la tabla y estadísticas
     function render() {
-      // Cálculos (usando parseFloat y manejo de valores vacíos)
+      // Asegurar que los cálculos usen números flotantes (los datos de Firestore son cadenas)
       const invertido = productos.reduce((acc, p) => acc + parseFloat(p.precioCompra || 0), 0);
       const vendidos = productos.filter(p => p.vendido).length;
       const beneficioTotal = productos.reduce((acc, p) => acc + ((parseFloat(p.precioVenta || 0) || 0) - parseFloat(p.precioCompra || 0)), 0);
       const stock = productos.filter(p => !p.vendido).length;
       const valorSinVender = productos.filter(p => !p.vendido).reduce((acc, p) => acc + parseFloat(p.valorVenta || 0), 0);
       
+      const renderTabla = (lista, incluirPorcentaje = false) => {
+        
+        // Mensaje si no hay productos
+        if (lista.length === 0) {
+            return '<p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow">No hay productos registrados en esta lista. Añade uno para empezar.</p>';
+        }
+
+        return `
+        <div class="overflow-x-auto">
+          <table class="min-w-full bg-white rounded-xl shadow-lg border border-gray-200">
+            <thead class="bg-gray-200">
+              <tr>
+                <th class="p-3 text-left">Producto</th>
+                <th class="p-3 text-left">Fecha compra</th>
+                <th class="p-3 text-right">Precio compra</th>
+                <th class="p-3 text-right">Precio venta</th>
+                <th class="p-3 text-left">Fecha venta</th>
+                <th class="p-3 text-center">Vendido</th>
+                <th class="p-3 text-right">Beneficio</th>
+                ${incluirPorcentaje ? `<th class="p-3 text-right">% Beneficio</th>` : ""}
+                <th class="p-3 text-left">Notas</th>
+                <th class="p-3 text-center">Editar</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lista.map(p => {
+                const compra = parseFloat(p.precioCompra || 0);
+                const venta = parseFloat(p.precioVenta || 0);
+                const beneficio = venta - compra;
+                let porcentaje = 'N/A';
+                if (p.vendido && compra !== 0) {
+                  porcentaje = ((beneficio / compra) * 100).toFixed(1);
+                }
+                const rowColor = p.vendido ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-red-50';
+
+                return `
+                  <tr class="${rowColor} border-t border-gray-100">
+                    <td class="p-3">${p.nombre}</td>
+                    <td class="p-3">${p.fecha || '-'}</td>
+                    <td class="p-3 text-right text-gray-700">€ ${formatPriceDisplay(p.precioCompra)}</td>
+                    <td class="p-3 text-right text-${p.vendido ? 'green' : 'red'}-600 font-medium">${p.precioVenta ? '€ ' + formatPriceDisplay(p.precioVenta) : '-'}</td>
+                    <td class="p-3">${p.fechaVenta || '-'}</td>
+                    <td class="p-3 text-center">${p.vendido ? '✅ Sí' : '❌ No'}</td>
+                    <td class="p-3 text-right font-semibold text-${beneficio >= 0 ? 'blue' : 'red'}-700">${beneficio.toFixed(2).replace('.', ',')} €</td>
+                    ${ incluirPorcentaje ? `<td class="p-3 text-right">${porcentaje === 'N/A' ? 'N/A' : porcentaje + '%'}</td>` : '' }
+                    <td class="p-3 text-sm text-gray-500 max-w-xs overflow-hidden text-ellipsis">${p.notas || '-'}</td>
+                    <td class="p-3 text-center"><button class="bg-blue-500 text-white text-sm px-3 py-1 rounded-full hover:bg-blue-600 transition shadow-sm" onclick='editProducto(${JSON.stringify(p)})'>Editar</button></td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>`;
+      };
+      
       const appContent = `
-        <h1 class="text-3xl font-bold text-center">📈 Seguimiento de Reventa</h1>
+        <h1 class="text-4xl font-extrabold text-center text-gray-800 mb-8">📈 Reventa Tracker Cloud</h1>
 
-        <div class="flex gap-4 justify-center mt-4">
-          <button onclick="tab='panel'; render(); renderForm()" class="px-4 py-2 ${tab === 'panel' ? 'bg-blue-500 text-white' : 'bg-gray-300 hover:bg-gray-400'} rounded transition">Panel</button>
-          <button onclick="tab='productos'; render(); renderForm()" class="px-4 py-2 ${tab === 'productos' ? 'bg-blue-500 text-white' : 'bg-gray-300 hover:bg-gray-400'} rounded transition">Mis Productos</button>
-          <button onclick="tab='estadisticas'; render(); renderForm()" class="px-4 py-2 ${tab === 'estadisticas' ? 'bg-blue-500 text-white' : 'bg-gray-300 hover:bg-gray-400'} rounded transition">Estadísticas</button>
+        <!-- Controles de pestaña -->
+        <div class="flex gap-4 justify-center p-2 rounded-xl bg-white shadow-inner">
+          <button onclick="tab='panel'; render(); renderForm()" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'panel' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}">Panel</button>
+          <button onclick="tab='productos'; render(); renderForm()" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'productos' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}">Mis Productos</button>
+          <button onclick="tab='estadisticas'; render(); renderForm()" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'estadisticas' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}">Estadísticas</button>
         </div>
 
+        <!-- Contenido de las pestañas -->
         ${tab === "panel" ? `
-        <h2 class="text-2xl font-semibold mt-6">Resumen del Inventario</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-          <div class="bg-white shadow p-4 rounded border-l-4 border-blue-500"><h2 class="text-xl text-gray-600">Invertido</h2><p class="text-2xl font-bold">€ ${invertido.toFixed(2).replace('.', ',')}</p></div>
-          <div class="bg-white shadow p-4 rounded border-l-4 border-green-500"><h2 class="text-xl text-gray-600">Vendidos</h2><p class="text-2xl font-bold">${vendidos}</p></div>
-          <div class="bg-white shadow p-4 rounded border-l-4 border-purple-500"><h2 class="text-xl text-gray-600">Beneficio total</h2><p class="text-2xl font-bold">€ ${beneficioTotal.toFixed(2).replace('.', ',')}</p></div>
-          <div class="bg-white shadow p-4 rounded border-l-4 border-red-500"><h2 class="text-xl text-gray-600">Stock</h2><p class="text-2xl font-bold">${stock}</p></div>
-          <div class="bg-white shadow p-4 rounded border-l-4 border-orange-500"><h2 class="text-xl text-gray-600">Valor sin vender</h2><p class="text-2xl font-bold">€ ${valorSinVender.toFixed(2).replace('.', ',')}</p></div>
+        <h2 class="text-2xl font-semibold text-gray-700 mt-6">Resumen del Inventario</h2>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
+          <div class="bg-white shadow-md p-4 rounded-xl border-l-4 border-blue-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-500">Invertido</h2><p class="text-2xl font-bold text-blue-700">€ ${invertido.toFixed(2).replace('.', ',')}</p></div>
+          <div class="bg-white shadow-md p-4 rounded-xl border-l-4 border-green-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-500">Vendidos</h2><p class="text-2xl font-bold text-green-700">${vendidos}</p></div>
+          <div class="bg-white shadow-md p-4 rounded-xl border-l-4 border-purple-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-500">Beneficio total</h2><p class="text-2xl font-bold text-purple-700">€ ${beneficioTotal.toFixed(2).replace('.', ',')}</p></div>
+          <div class="bg-white shadow-md p-4 rounded-xl border-l-4 border-red-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-500">Stock</h2><p class="text-2xl font-bold text-red-700">${stock}</p></div>
+          <div class="bg-white shadow-md p-4 rounded-xl border-l-4 border-orange-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-500">Valor sin vender</h2><p class="text-2xl font-bold text-orange-700">€ ${valorSinVender.toFixed(2).replace('.', ',')}</p></div>
         </div>
 
-        <h2 class="text-2xl font-semibold mt-6">Inventario Completo</h2>
+        <h2 class="text-2xl font-semibold text-gray-700 mt-6">Inventario Completo</h2>
         <div class="mt-4">${renderTabla(productos)}</div>
         ` : ""}
 
 
         ${tab === "productos" ? `
-          <h2 class="text-2xl font-semibold mt-6">Detalle de Productos (con % Beneficio)</h2>
+          <h2 class="text-2xl font-semibold text-gray-700 mt-6">Detalle de Productos</h2>
           ${renderTabla(productos, true)}
         ` : ""}
 
         ${tab === "estadisticas" ? `
-        <h2 class="text-2xl font-semibold mt-6">Estadísticas Clave</h2>
+        <h2 class="text-2xl font-semibold text-gray-700 mt-6">Estadísticas Clave</h2>
         <div class="space-y-4">
-          <div class="bg-white p-4 shadow rounded border-l-4 border-purple-500">
-            <h2 class="text-xl font-medium">🥇 Producto con más beneficio</h2>
-            <p class="text-lg mt-1">${productos.length ? productos.sort((a,b)=>((parseFloat(b.precioVenta)||0)-parseFloat(b.precioCompra))-((parseFloat(a.precioVenta)||0)-parseFloat(a.precioCompra)))[0].nombre : 'No hay productos registrados'}</p>
+          ${productos.length > 0 ? `
+          <div class="bg-white p-6 shadow-md rounded-xl border-l-4 border-purple-500">
+            <h2 class="text-xl font-medium text-purple-700">🥇 Producto con más beneficio (Neto)</h2>
+            <p class="text-lg mt-1 font-semibold">${productos.sort((a,b)=>((parseFloat(b.precioVenta)||0)-parseFloat(b.precioCompra))-((parseFloat(a.precioVenta)||0)-parseFloat(a.precioCompra)))[0].nombre} (Beneficio: € ${beneficioTotal.toFixed(2).replace('.', ',')})</p>
           </div>
 
-          <div class="bg-white p-4 shadow rounded border-l-4 border-teal-500">
-            <h2 class="text-xl font-medium">⏱️ Velocidad de venta</h2>
+          <div class="bg-white p-6 shadow-md rounded-xl border-l-4 border-teal-500">
+            <h2 class="text-xl font-medium text-teal-700">⏱️ Velocidad de venta</h2>
             ${productos.filter(p => p.vendido && p.fecha && p.fechaVenta).length ? (() => {
               const vendidos = productos.filter(p => p.vendido && p.fecha && p.fechaVenta).map(p => {
                 const dias = Math.ceil((new Date(p.fechaVenta) - new Date(p.fecha)) / 86400000);
@@ -206,17 +301,21 @@
               });
               const masRap = vendidos.reduce((a,b)=> a.dias<b.dias?a:b);
               const masLen = vendidos.reduce((a,b)=> a.dias>b.dias?a:b);
-              return `<p class="mt-1"><strong>Más rápido:</strong> ${masRap.nombre} (${masRap.dias} días)</p><p><strong>Más lento:</strong> ${masLen.nombre} (${masLen.dias} días)</p>`;
-            })() : '<p class="mt-1">No hay datos suficientes de ventas con fecha de compra y venta.</p>'}
+              return `<p class="mt-1"><strong>🚀 Más rápido:</strong> ${masRap.nombre} (${masRap.dias} días)</p><p><strong>🐢 Más lento:</strong> ${masLen.nombre} (${masLen.dias} días)</p>`;
+            })() : '<p class="mt-1 text-gray-500">No hay datos suficientes de ventas con fecha de compra y venta.</p>'}
           </div>
+          ` : '<p class="text-center text-gray-500 p-8 bg-white rounded-xl shadow">Añade productos para ver las estadísticas.</p>'}
         </div>` : ""}
       `;
 
       document.getElementById("app").innerHTML = appContent;
     }
 
-    renderForm(); 
-    render();
+    // INICIO DE LA APLICACIÓN: Cargar datos de Firebase al inicio
+    // Solo inicia si Firebase se inicializó correctamente
+    if (typeof firebase !== 'undefined') {
+        loadProductos();
+    }
   </script>
 </body>
 </html>
