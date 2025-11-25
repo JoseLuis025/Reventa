@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reventa Tracker - Sincronizado en la Nube</title>
+  <title>Reventa Tracker - Versión Local</title>
   <script src="https://cdn.tailwindcss.com"></script>
 
   <style>
@@ -11,87 +11,55 @@
     body {
         font-family: 'Inter', sans-serif;
     }
-    /* Estilo para ocultar el formulario mientras se carga Firebase */
-    #form-container { opacity: 0; transition: opacity 0.5s; }
-    .loaded #form-container { opacity: 1; }
   </style>
 </head>
 <!-- APLICO EL MODO OSCURO PRINCIPAL AQUÍ -->
 <body class="bg-slate-900 p-6 rounded-xl text-gray-100">
   <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
+  <!-- El formulario está fuera del div 'app' para evitar re-renderizados completos -->
   <div id="form-container" class="max-w-6xl mx-auto"></div> 
 
-  <!-- Todo el JavaScript ahora está en un solo bloque 'type="module"' -->
-  <script type="module">
+  <script>
     // =================================================================
-    // 1. INCLUIR LIBRERÍAS DE FIREBASE (V9 modular con imports)
+    // CONFIGURACIÓN Y PERSISTENCIA (USANDO LOCALSTORAGE)
     // =================================================================
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-    import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, FieldValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+    const LOCAL_STORAGE_KEY = "productosReventa";
 
-
-    // =================================================================
-    // CONFIGURACIÓN DE FIREBASE Y CONEXIÓN
-    // =================================================================
-    // NOTA: Reemplaza estas credenciales con las tuyas.
-    const firebaseConfig = {
-        apiKey: "AIzaSyDjTf3MR6Hn6G5igOQocjLb2cW6kogaeM4",
-        authDomain: "reventa-de8be.firebaseapp.com",
-        projectId: "reventa-de8be",
-        storageBucket: "reventa-de8be.firebasestorage.app",
-        messagingSenderId: "396010674100",
-        appId: "1:396010674100:web:28532dafe6f223969404e1"
-    };
-
-    let db; 
-    let COLLECTION_NAME = "productosReventa";
-
-    // Inicializar Firebase y Firestore
-    try {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-    } catch (error) {
-        console.error("Error al inicializar Firebase: ", error);
-        document.getElementById('app').innerHTML = `
-            <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative" role="alert">
-              <strong class="font-bold">¡Error de conexión!</strong>
-              <span class="block sm:inline">No se pudo inicializar Firebase. Revise la consola.</span>
-            </div>
-        `;
-    }
-
-
-    // =================================================================
-    // ESTADO LOCAL DE LA APLICACIÓN
-    // =================================================================
-    let productos = [];
+    // Estado: Carga los datos guardados en la memoria del navegador
+    let productos = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
     let tab = "panel";
     let editing = null;
 
     const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
     let form = { ...emptyForm };
     
-    function setFormField(field, value) {
-      form[field] = value;
+    // Función para guardar los productos en el localStorage
+    function saveLS() {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(productos));
     }
-    
-    // Función para cambiar de pestaña y re-renderizar (Nueva función clave para la navegación)
-    function setTab(newTab) {
-      tab = newTab;
-      // Si cambiamos a una pestaña que no es el panel, reseteamos/ocultamos el formulario de edición/creación
-      if (newTab !== 'panel') {
-          editing = null;
-          form = { ...emptyForm };
-      }
-      renderForm(); // Renderiza el formulario (o lo oculta si no es 'panel')
-      render();     // Renderiza el contenido principal de la pestaña
-    }
-
 
     // Normalizar precios: permite coma/punto al escribir, guarda con punto
     function normalizePrice(priceString) {
       if (!priceString) return "";
+      // Reemplaza comas por puntos y elimina cualquier caracter que no sea dígito o punto
       return priceString.toString().replace(/,/g, '.').replace(/[^\d.]/g, '');
+    }
+
+    // 💡 SOLUCIÓN CLAVE 1: setFormField ya NO llama a render() para evitar perder el foco del input
+    function setFormField(field, value) {
+      form[field] = value;
+      // No renderizamos, solo actualizamos el objeto 'form'
+    }
+    
+    // Función para cambiar de pestaña y re-renderizar
+    function setTab(newTab) {
+      tab = newTab;
+      if (newTab !== 'panel') {
+          editing = null;
+          form = { ...emptyForm };
+      }
+      renderForm(); // Necesario para resetear el formulario si se cambia de pestaña
+      render();     
     }
 
     // Formatea un número para mostrarlo con coma como separador decimal (ej. 148,10)
@@ -102,52 +70,11 @@
     };
 
     // =================================================================
-    // LÓGICA DE CARGA Y GUARDADO (USANDO FIRESTORE)
+    // LÓGICA DE GUARDADO
     // =================================================================
 
-    // Carga inicial y listener en tiempo real
-    function loadProductos() {
-      if (!db) return; 
-
-      try {
-        const colRef = collection(db, COLLECTION_NAME);
-
-        onSnapshot(colRef, (snapshot) => {
-            // Mapea los documentos de Firestore al estado local 'productos'
-            productos = snapshot.docs.map(doc => ({ 
-              id: doc.id, 
-              ...doc.data(),
-              precioCompra: doc.data().precioCompra || "",
-              precioVenta: doc.data().precioVenta || "",
-              valorVenta: doc.data().valorVenta || ""
-            }));
-
-            // Una vez cargado, muestra el formulario y la app
-            document.body.classList.add('loaded');
-            renderForm();
-            render();
-        }, (error) => {
-            console.error("Error al cargar productos en tiempo real: ", error);
-            document.getElementById('app').innerHTML = `
-                <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative mt-8" role="alert">
-                  <strong class="font-bold">¡Error de Permisos o Conexión!</strong>
-                  <span class="block sm:inline">No se pueden leer los datos. Verifique sus Reglas de Seguridad de Firebase.</span>
-                </div>
-            `;
-        });
-
-      } catch (error) {
-        console.error("Error al iniciar el listener de Firestore: ", error);
-      }
-    }
-
-    // Guarda o actualiza un producto en Firestore
-    async function saveProducto() {
-      if (!db) {
-         console.error("Error: La conexión a la base de datos no está activa.");
-         return;
-      }
-
+    // Guarda o actualiza un producto en localStorage
+    function saveProducto() {
       // 1. Normalizar y validar
       const precioCompraNormalizado = normalizePrice(form.precioCompra);
 
@@ -164,42 +91,53 @@
         return;
       }
       
-      // Limpia el mensaje de error si la validación es exitosa
       document.getElementById('form-error').innerHTML = '';
       
       const isVendido = !!productoToSave.precioVenta;
-      // Añade el campo 'vendido' y la marca de tiempo de actualización (V9)
-      const dataToSave = { ...productoToSave, vendido: isVendido, updatedAt: FieldValue.serverTimestamp() };
+      const dataToSave = { 
+        ...productoToSave, 
+        vendido: isVendido,
+        // En localStorage, a menudo usamos un ID simple basado en tiempo para nuevos elementos
+        id: editing || Date.now().toString()
+      };
 
       try {
         if (editing) {
-          // Actualizar documento existente
-          const docRef = doc(db, COLLECTION_NAME, editing);
-          await updateDoc(docRef, dataToSave);
+          // Actualizar producto existente
+          productos = productos.map(p => p.id === editing ? dataToSave : p);
         } else {
-          // Añadir nuevo documento
-          await addDoc(collection(db, COLLECTION_NAME), dataToSave);
+          // Añadir nuevo producto
+          productos.push(dataToSave);
         }
 
-        // 2. Resetear el formulario tras guardar
+        // 2. Guardar en localStorage y actualizar UI
+        saveLS();
+
+        // 💡 SOLUCIÓN CLAVE 2: Resetear el formulario y LLAMAR EXPLICITAMENTE a renderForm()
         form = { ...emptyForm };
         editing = null; 
-        renderForm(); 
-        console.log("Producto guardado con éxito.");
+        renderForm(); // <-- Vuelve a dibujar el formulario vacío o de añadir
+        render(); // Volver a dibujar la tabla con los nuevos datos
+        console.log("Producto guardado con éxito en localStorage.");
 
       } catch (error) {
-        console.error("Error al guardar producto en Firestore:", error);
-        // Muestra error detallado en la UI
-        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar: ${error.message}. ¿Reglas de Seguridad?</div>`;
+        console.error("Error al guardar producto en localStorage:", error);
+        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar localmente: ${error.message}.</div>`;
       }
     }
 
     // Carga los datos de un producto en el formulario para editar
     function editProducto(p) {
       editing = p.id;
-      form = { ...p }; 
-      renderForm(); 
-      // Desplaza al formulario para empezar a editar
+      // Usamos los datos originales del producto
+      form = { 
+          ...p,
+          // Aseguramos que los campos numéricos sean cadenas para los inputs
+          precioCompra: p.precioCompra.toString(),
+          precioVenta: p.precioVenta.toString(),
+          valorVenta: p.valorVenta.toString()
+      }; 
+      renderForm(); // <-- Vuelve a dibujar el formulario con los datos a editar
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -207,7 +145,7 @@
     // RENDERIZADO DE LA UI
     // =================================================================
 
-    // Renderiza el formulario de entrada/edición
+    // 💡 SOLUCIÓN CLAVE 3: Implementación de renderForm() para gestionar solo el formulario
     function renderForm() {
       const inputClasses = "border border-gray-700 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition bg-slate-700 text-white";
       
@@ -229,7 +167,6 @@
       document.getElementById("form-container").innerHTML = formHTML;
     }
 
-    // Renderiza las pestañas de resumen, tabla y estadísticas
     function render() {
       // Cálculos de resumen
       const invertido = productos.reduce((acc, p) => acc + parseFloat(p.precioCompra || 0), 0);
@@ -241,7 +178,6 @@
       const renderTabla = (lista, incluirPorcentaje = false) => {
         
         if (lista.length === 0) {
-            // Fondo oscuro para mensaje vacío
             return '<p class="text-center text-gray-400 p-8 bg-gray-800 rounded-xl shadow">No hay productos registrados en esta lista. Añade uno para empezar.</p>';
         }
 
@@ -269,10 +205,8 @@
                 const beneficio = venta - compra;
                 let porcentaje = 'N/A';
                 if (p.vendido && compra !== 0) {
-                  // Cálculo de % de beneficio: (Beneficio / Coste) * 100
                   porcentaje = ((beneficio / compra) * 100).toFixed(1);
                 }
-                // Ajuste de colores de fila para Dark Mode
                 const rowColor = p.vendido ? 'bg-green-900/40 hover:bg-green-900/70' : 'hover:bg-red-900/40';
 
                 return `
@@ -280,11 +214,9 @@
                     <td class="p-3">${p.nombre}</td>
                     <td class="p-3">${p.fecha || '-'}</td>
                     <td class="p-3 text-right text-gray-400">€ ${formatPriceDisplay(p.precioCompra)}</td>
-                    <!-- Ajuste de texto de venta -->
                     <td class="p-3 text-right text-${p.vendido ? 'green-400' : 'red-400'} font-medium">${p.precioVenta ? '€ ' + formatPriceDisplay(p.precioVenta) : '-'}</td>
                     <td class="p-3">${p.fechaVenta || '-'}</td>
                     <td class="p-3 text-center">${p.vendido ? '✅ Sí' : '❌ No'}</td>
-                    <!-- Ajuste de texto de beneficio -->
                     <td class="p-3 text-right font-semibold text-${beneficio >= 0 ? 'blue-400' : 'red-400'}">${beneficio.toFixed(2).replace('.', ',')} €</td>
                     ${ incluirPorcentaje ? `<td class="p-3 text-right">${porcentaje === 'N/A' ? 'N/A' : porcentaje + '%'}</td>` : '' }
                     <td class="p-3 text-sm text-gray-400 max-w-xs overflow-hidden text-ellipsis">${p.notas || '-'}</td>
@@ -297,10 +229,10 @@
         </div>`;
       };
       
-      const appContent = `
-        <h1 class="text-4xl font-extrabold text-center text-white mb-8">📈 Reventa Tracker Cloud</h1>
+      const mainContent = `
+        <h1 class="text-4xl font-extrabold text-center text-white mb-8">📈 Reventa Tracker (Local)</h1>
 
-        <!-- Controles de pestaña: AHORA LLAMAN A setTab() -->
+        <!-- Controles de pestaña -->
         <div class="flex gap-4 justify-center p-2 rounded-xl bg-slate-800 shadow-inner">
           <button onclick="setTab('panel')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'panel' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Panel</button>
           <button onclick="setTab('productos')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'productos' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Mis Productos</button>
@@ -310,7 +242,7 @@
         <!-- Contenido de las pestañas -->
         ${tab === "panel" ? `
         <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen del Inventario</h2>
-        <!-- Tarjetas de resumen ajustadas para Dark Mode (bg-gray-800, text-400) -->
+        <!-- Tarjetas de resumen ajustadas para Dark Mode -->
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
           <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-blue-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Invertido</h2><p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2).replace('.', ',')}</p></div>
           <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-green-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Vendidos</h2><p class="text-2xl font-bold text-green-400">${vendidos}</p></div>
@@ -333,23 +265,19 @@
         <h2 class="text-2xl font-semibold text-gray-300 mt-6">Estadísticas Clave</h2>
         <div class="space-y-4">
           ${productos.length > 0 ? (() => {
-            // Lógica para encontrar el producto más rentable (SOLO productos vendidos)
             const vendidosConBeneficio = productos
                 .filter(p => p.vendido)
                 .map(p => {
-                    // Aseguramos que los valores sean números antes de restar
                     const beneficio = (parseFloat(p.precioVenta || 0) - parseFloat(p.precioCompra || 0));
                     return { ...p, beneficio: beneficio };
                 });
             
             let mejorProducto = null;
             if (vendidosConBeneficio.length > 0) {
-                // Ordenar para encontrar el producto con el mayor beneficio individual
                 mejorProducto = vendidosConBeneficio.sort((a, b) => b.beneficio - a.beneficio)[0];
             }
 
             return `
-            <!-- Ajuste para Dark Mode -->
             <div class="bg-gray-800 p-6 shadow-md rounded-xl border-l-4 border-purple-500">
               <h2 class="text-xl font-medium text-purple-400">🥇 Producto con más beneficio (Neto Individual)</h2>
               <p class="text-lg mt-1 font-semibold">${mejorProducto ? mejorProducto.nombre : 'No hay productos vendidos' } 
@@ -357,12 +285,10 @@
               </p>
             </div>
             
-            <!-- Ajuste para Dark Mode -->
             <div class="bg-gray-800 p-6 shadow-md rounded-xl border-l-4 border-teal-500">
               <h2 class="text-xl font-medium text-teal-400">⏱️ Velocidad de venta</h2>
               ${productos.filter(p => p.vendido && p.fecha && p.fechaVenta).length ? (() => {
                 const vendidos = productos.filter(p => p.vendido && p.fecha && p.fechaVenta).map(p => {
-                  // Cálculo de días de diferencia
                   const dias = Math.ceil((new Date(p.fechaVenta) - new Date(p.fecha)) / 86400000);
                   return { ...p, dias };
                 });
@@ -375,19 +301,24 @@
         </div>` : ""}
       `;
 
-      document.getElementById("app").innerHTML = appContent;
-    }
-
-    // INICIO DE LA APLICACIÓN: Inicia la escucha de datos en tiempo real
-    if (typeof initializeApp !== 'undefined') {
-        loadProductos();
+      document.getElementById("app").innerHTML = mainContent;
+      // Esto asegura que el formulario se muestre siempre que estemos en el panel
+      if (tab === 'panel') {
+          renderForm(); 
+      }
     }
     
     // =================================================================
+    // INICIO DE LA APLICACIÓN
+    // =================================================================
+    // Renderizamos al inicio para mostrar los datos de localStorage.
+    renderForm();
+    render();
+
+    // =================================================================
     // EXPOSICIÓN GLOBAL (NECESARIO PARA ONCLICK EN HTML)
     // =================================================================
-    // Exponemos las funciones necesarias al objeto window para que los eventos onclick del HTML puedan acceder a ellas.
-    window.setTab = setTab; // <-- Nuevo: Para manejar la navegación correctamente
+    window.setTab = setTab;
     window.render = render;
     window.renderForm = renderForm;
     window.saveProducto = saveProducto;
@@ -395,5 +326,7 @@
     window.editProducto = editProducto;
 
   </script>
+</body>
+</html>
 </body>
 </html>
