@@ -12,152 +12,79 @@
         font-family: 'Inter', sans-serif;
     }
     /* Estilo para ocultar el formulario mientras se carga Firebase */
-    #loading-overlay { 
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-        background-color: rgba(17, 24, 39, 0.95); /* bg-slate-900 con transparencia */
-        z-index: 50; 
-        display: flex; justify-content: center; align-items: center; 
-        color: white; 
-        font-size: 1.5rem;
-    }
-    .hidden { display: none !important; }
-
-    /* Animación simple de carga */
-    .spinner {
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top-color: #3b82f6; /* blue-500 */
-      width: 40px;
-      height: 40px;
-      animation: spin 1s ease-in-out infinite;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    #form-container { opacity: 0; transition: opacity 0.5s; }
+    .loaded #form-container { opacity: 1; }
   </style>
 </head>
+<!-- APLICO EL MODO OSCURO PRINCIPAL AQUÍ -->
 <body class="bg-slate-900 p-6 rounded-xl text-gray-100">
-  <!-- Overlay de carga (se usa solo si estamos intentando conectar a la nube) -->
-  <div id="loading-overlay">
-    <div class="flex flex-col items-center space-y-4">
-      <div class="spinner"></div>
-      <p>Intentando Conectar a la Nube...</p>
-    </div>
-  </div>
+  <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
+  <div id="form-container" class="max-w-6xl mx-auto"></div> 
 
-  <div id="app" class="max-w-6xl mx-auto space-y-6 hidden"></div>
-  <div id="form-container" class="max-w-6xl mx-auto hidden"></div> 
-
+  <!-- Todo el JavaScript ahora está en un solo bloque 'type="module"' -->
   <script type="module">
     // =================================================================
-    // 1. INCLUIR LIBRERÍAS DE FIREBASE
+    // 1. INCLUIR LIBRERÍAS DE FIREBASE (V9 modular con imports)
     // =================================================================
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
-    import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+    import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, FieldValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
 
     // =================================================================
-    // CONFIGURACIÓN DE FIREBASE Y FALLBACK (USANDO LOCAL STORAGE)
+    // CONFIGURACIÓN DE FIREBASE Y CONEXIÓN
     // =================================================================
-    
-    // Bandera para saber si estamos usando la nube o el LocalStorage
-    let isCloudMode = false;
+    // NOTA: Reemplaza estas credenciales con las tuyas.
+    const firebaseConfig = {
+        apiKey: "AIzaSyDjTf3MR6Hn6G5igOQocjLb2cW6kogaeM4",
+        authDomain: "reventa-de8be.firebaseapp.com",
+        projectId: "reventa-de8be",
+        storageBucket: "reventa-de8be.firebasestorage.app",
+        messagingSenderId: "396010674100",
+        appId: "1:396010674100:web:28532dafe6f223969404e1"
+    };
 
-    // Estado local para LocalStorage
-    let productos = JSON.parse(localStorage.getItem("productosReventa")) || [];
-    
-    // Funciones de LocalStorage (Fallback)
-    function saveLS() {
-      localStorage.setItem("productosReventa", JSON.stringify(productos));
-      renderForm();
-      render();
-    }
-    
-    function loadLS() {
-        productos = JSON.parse(localStorage.getItem("productosReventa")) || [];
-        renderForm();
-        render();
-    }
-    
     let db; 
-    let auth;
-    let userId = 'local'; // ID por defecto para LocalStorage
-    let COLLECTION_PATH;
+    let COLLECTION_NAME = "productosReventa";
 
-    // Inicializar Firebase, autenticación y Firestore
-    async function initializeFirebase() {
-        const overlay = document.getElementById('loading-overlay');
-        const appEl = document.getElementById('app');
-        const formEl = document.getElementById('form-container');
-        
-        // 1. Intentar configurar la nube
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        
-        // La condición que falló antes: `!firebaseConfig.projectId`
-        if (firebaseConfig.projectId) {
-            try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                await signInAnonymously(auth);
-                userId = auth.currentUser.uid;
-                
-                COLLECTION_PATH = `artifacts/${appId}/users/${userId}/reventa_items`;
-                
-                isCloudMode = true; // ¡Conexión exitosa a la nube!
-                
-                overlay.classList.add('hidden');
-                appEl.classList.remove('hidden');
-                formEl.classList.remove('hidden');
-
-                // Iniciar la carga de productos en tiempo real (Cloud)
-                loadProductosCloud();
-                console.log("✅ Conexión a Firebase Firestore exitosa.");
-                return; // Finaliza aquí si la nube funciona
-
-            } catch (error) {
-                console.error("❌ Falló la conexión a Firebase. Usando LocalStorage. Error:", error);
-                // Si falla por cualquier motivo, caemos al fallback
-            }
-        } else {
-             console.log("⚠️ Configuración de Firebase no disponible. Usando LocalStorage.");
-             // Si la configuración no está disponible, caemos al fallback
-        }
-
-        // 2. Fallback a LocalStorage
-        isCloudMode = false;
-        overlay.classList.add('hidden');
-        appEl.classList.remove('hidden');
-        formEl.classList.remove('hidden');
-        loadLS(); // Carga productos de LocalStorage
+    // Inicializar Firebase y Firestore
+    try {
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+    } catch (error) {
+        console.error("Error al inicializar Firebase: ", error);
+        document.getElementById('app').innerHTML = `
+            <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative" role="alert">
+              <strong class="font-bold">¡Error de conexión!</strong>
+              <span class="block sm:inline">No se pudo inicializar Firebase. Revise la consola.</span>
+            </div>
+        `;
     }
 
 
     // =================================================================
     // ESTADO LOCAL DE LA APLICACIÓN
     // =================================================================
+    let productos = [];
     let tab = "panel";
     let editing = null;
 
     const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
     let form = { ...emptyForm };
     
-    // setFormField ya NO llama a render() para evitar perder el foco del input
     function setFormField(field, value) {
       form[field] = value;
     }
     
+    // Función para cambiar de pestaña y re-renderizar (Nueva función clave para la navegación)
     function setTab(newTab) {
       tab = newTab;
+      // Si cambiamos a una pestaña que no es el panel, reseteamos/ocultamos el formulario de edición/creación
       if (newTab !== 'panel') {
           editing = null;
           form = { ...emptyForm };
       }
-      renderForm(); 
-      render();     
+      renderForm(); // Renderiza el formulario (o lo oculta si no es 'panel')
+      render();     // Renderiza el contenido principal de la pestaña
     }
 
 
@@ -170,40 +97,43 @@
     // Formatea un número para mostrarlo con coma como separador decimal (ej. 148,10)
     const formatPriceDisplay = (priceString) => {
         const num = parseFloat(priceString);
-        if (isNaN(num)) return '0,00';
+        if (isNaN(num)) return '-';
         return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
     // =================================================================
-    // LÓGICA DE CARGA Y GUARDADO (CLOUD)
+    // LÓGICA DE CARGA Y GUARDADO (USANDO FIRESTORE)
     // =================================================================
 
-    // Carga inicial y listener en tiempo real (CLOUD)
-    function loadProductosCloud() {
-      if (!db || !COLLECTION_PATH) return; 
+    // Carga inicial y listener en tiempo real
+    function loadProductos() {
+      if (!db) return; 
 
       try {
-        const colRef = collection(db, COLLECTION_PATH);
+        const colRef = collection(db, COLLECTION_NAME);
 
         onSnapshot(colRef, (snapshot) => {
+            // Mapea los documentos de Firestore al estado local 'productos'
             productos = snapshot.docs.map(doc => ({ 
               id: doc.id, 
               ...doc.data(),
               precioCompra: doc.data().precioCompra || "",
               precioVenta: doc.data().precioVenta || "",
-              valorVenta: doc.data().valorVenta || "",
-              fecha: doc.data().fecha || "",
-              fechaVenta: doc.data().fechaVenta || ""
+              valorVenta: doc.data().valorVenta || ""
             }));
 
+            // Una vez cargado, muestra el formulario y la app
+            document.body.classList.add('loaded');
             renderForm();
             render();
-            console.log(`Productos cargados (${productos.length}). UI actualizada.`);
-
         }, (error) => {
             console.error("Error al cargar productos en tiempo real: ", error);
-            // Si hay un error de permisos en CLOUD, sigue mostrando la UI
-            document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error: Problemas de permisos con Firestore.</div>`;
+            document.getElementById('app').innerHTML = `
+                <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative mt-8" role="alert">
+                  <strong class="font-bold">¡Error de Permisos o Conexión!</strong>
+                  <span class="block sm:inline">No se pueden leer los datos. Verifique sus Reglas de Seguridad de Firebase.</span>
+                </div>
+            `;
         });
 
       } catch (error) {
@@ -211,8 +141,14 @@
       }
     }
 
-    // Guarda o actualiza un producto (CLOUD/LOCAL)
+    // Guarda o actualiza un producto en Firestore
     async function saveProducto() {
+      if (!db) {
+         console.error("Error: La conexión a la base de datos no está activa.");
+         return;
+      }
+
+      // 1. Normalizar y validar
       const precioCompraNormalizado = normalizePrice(form.precioCompra);
 
       const productoToSave = {
@@ -223,73 +159,47 @@
       };
 
       if (!productoToSave.nombre || isNaN(parseFloat(precioCompraNormalizado))) {
+        // Muestra error en la UI si faltan datos esenciales
         document.getElementById('form-error').innerHTML = '<div class="text-red-400 font-medium">❌ Debes rellenar el nombre y el precio de compra con un número válido.</div>';
         return;
       }
       
+      // Limpia el mensaje de error si la validación es exitosa
       document.getElementById('form-error').innerHTML = '';
       
       const isVendido = !!productoToSave.precioVenta;
-      const dataToSave = { 
-        ...productoToSave, 
-        vendido: isVendido, 
-        // Solo añadimos timestamp si es CLOUD
-        ...(isCloudMode ? { updatedAt: serverTimestamp() } : {})
-      };
+      // Añade el campo 'vendido' y la marca de tiempo de actualización (V9)
+      const dataToSave = { ...productoToSave, vendido: isVendido, updatedAt: FieldValue.serverTimestamp() };
 
-      const isNew = !editing;
+      try {
+        if (editing) {
+          // Actualizar documento existente
+          const docRef = doc(db, COLLECTION_NAME, editing);
+          await updateDoc(docRef, dataToSave);
+        } else {
+          // Añadir nuevo documento
+          await addDoc(collection(db, COLLECTION_NAME), dataToSave);
+        }
 
-      if (isCloudMode && db) {
-          // LÓGICA DE FIRESTORE (NUBE)
-          try {
-              if (editing) {
-                  const docRef = doc(db, COLLECTION_PATH, editing);
-                  await updateDoc(docRef, dataToSave);
-              } else {
-                  // Cuando es nuevo, no necesitamos el ID, Firestore lo crea
-                  await addDoc(collection(db, COLLECTION_PATH), dataToSave);
-              }
-              console.log("Producto guardado con éxito en Firestore.");
-          } catch (error) {
-              console.error("Error al guardar producto en Firestore:", error);
-              document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar en la nube: ${error.message}.</div>`;
-          }
-      } else {
-          // LÓGICA DE LOCALSTORAGE (FALLBACK)
-          if (editing) {
-              productos = productos.map(p => p.id === editing ? { ...p, ...dataToSave } : p);
-          } else {
-              // Asigna un ID único a los productos locales
-              productos.push({ ...dataToSave, id: crypto.randomUUID() });
-          }
-          saveLS(); // Guarda en LocalStorage
-          console.log("Producto guardado con éxito en LocalStorage.");
+        // 2. Resetear el formulario tras guardar
+        form = { ...emptyForm };
+        editing = null; 
+        renderForm(); 
+        console.log("Producto guardado con éxito.");
+
+      } catch (error) {
+        console.error("Error al guardar producto en Firestore:", error);
+        // Muestra error detallado en la UI
+        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar: ${error.message}. ¿Reglas de Seguridad?</div>`;
       }
-
-      // 2. Resetear el formulario tras guardar
-      form = { ...emptyForm };
-      editing = null; 
-      renderForm(); 
-      
-      // Muestra mensaje de éxito (temporal)
-      document.getElementById('form-error').innerHTML = `<div class="text-green-400 font-medium">✅ Producto ${isNew ? 'añadido' : 'actualizado'} con éxito. (${isCloudMode ? 'Nube' : 'Local'})</div>`;
-      setTimeout(() => {
-        document.getElementById('form-error').innerHTML = '';
-      }, 3000);
     }
 
     // Carga los datos de un producto en el formulario para editar
     function editProducto(p) {
       editing = p.id;
-      document.getElementById('form-error').innerHTML = '';
-      
-      form = { 
-          ...p,
-          precioCompra: p.precioCompra.toString(),
-          precioVenta: p.precioVenta.toString(),
-          valorVenta: p.valorVenta.toString()
-      }; 
+      form = { ...p }; 
       renderForm(); 
+      // Desplaza al formulario para empezar a editar
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -301,22 +211,15 @@
     function renderForm() {
       const inputClasses = "border border-gray-700 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition bg-slate-700 text-white";
       
-      // Mensaje de estado de la base de datos
-      const statusMessage = isCloudMode 
-          ? `<p class="text-sm text-green-400 font-medium">✨ Modo NUBE activado (Firestore) - Usuario: ${userId}</p>` 
-          : `<p class="text-sm text-yellow-400 font-medium">⚠️ Modo LOCAL activado (LocalStorage). Los datos NO se sincronizan.</p>`;
-
       const formHTML = tab === "panel" ? `
-        <div id="resale-form" class="bg-gray-800 shadow-lg rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-4 mb-3 transition">
-          ${statusMessage}
-          
-          <input class="${inputClasses} md:col-span-2" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
+        <div id="resale-form" class="bg-gray-800 shadow-lg rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-4 mb-3 transition transform hover:scale-[1.01] duration-300">
+          <input class="${inputClasses}" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
           <input class="${inputClasses}" placeholder="Precio compra (€)" type="text" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
           <input class="${inputClasses}" placeholder="Precio venta (€)" type="text" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
           <input class="${inputClasses}" placeholder="Valor venta (€)" type="text" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
           <input class="${inputClasses}" placeholder="Fecha compra" type="date" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
           <input class="${inputClasses}" placeholder="Fecha venta" type="date" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
-          <input class="${inputClasses} md:col-span-7" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
+          <input class="${inputClasses} md:col-span-2" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
           
           <div id="form-error" class="md:col-span-7"></div> 
           
@@ -338,6 +241,7 @@
       const renderTabla = (lista, incluirPorcentaje = false) => {
         
         if (lista.length === 0) {
+            // Fondo oscuro para mensaje vacío
             return '<p class="text-center text-gray-400 p-8 bg-gray-800 rounded-xl shadow">No hay productos registrados en esta lista. Añade uno para empezar.</p>';
         }
 
@@ -368,17 +272,20 @@
                   // Cálculo de % de beneficio: (Beneficio / Coste) * 100
                   porcentaje = ((beneficio / compra) * 100).toFixed(1);
                 }
-                const rowColor = p.vendido ? 'bg-gray-800/80 hover:bg-gray-700' : 'bg-gray-800/80 hover:bg-gray-700';
+                // Ajuste de colores de fila para Dark Mode
+                const rowColor = p.vendido ? 'bg-green-900/40 hover:bg-green-900/70' : 'hover:bg-red-900/40';
 
                 return `
                   <tr class="${rowColor} border-t border-gray-700 text-gray-300">
                     <td class="p-3">${p.nombre}</td>
                     <td class="p-3">${p.fecha || '-'}</td>
                     <td class="p-3 text-right text-gray-400">€ ${formatPriceDisplay(p.precioCompra)}</td>
+                    <!-- Ajuste de texto de venta -->
                     <td class="p-3 text-right text-${p.vendido ? 'green-400' : 'red-400'} font-medium">${p.precioVenta ? '€ ' + formatPriceDisplay(p.precioVenta) : '-'}</td>
                     <td class="p-3">${p.fechaVenta || '-'}</td>
                     <td class="p-3 text-center">${p.vendido ? '✅ Sí' : '❌ No'}</td>
-                    <td class="p-3 text-right font-semibold text-${beneficio >= 0 ? 'blue-400' : 'red-400'}">${formatPriceDisplay(beneficio)} €</td>
+                    <!-- Ajuste de texto de beneficio -->
+                    <td class="p-3 text-right font-semibold text-${beneficio >= 0 ? 'blue-400' : 'red-400'}">${beneficio.toFixed(2).replace('.', ',')} €</td>
                     ${ incluirPorcentaje ? `<td class="p-3 text-right">${porcentaje === 'N/A' ? 'N/A' : porcentaje + '%'}</td>` : '' }
                     <td class="p-3 text-sm text-gray-400 max-w-xs overflow-hidden text-ellipsis">${p.notas || '-'}</td>
                     <td class="p-3 text-center"><button class="bg-blue-500 text-white text-sm px-3 py-1 rounded-full hover:bg-blue-600 transition shadow-sm" onclick='editProducto(${JSON.stringify(p)})'>Editar</button></td>
@@ -391,9 +298,9 @@
       };
       
       const appContent = `
-        <h1 class="text-4xl font-extrabold text-center text-white mb-8">📈 Reventa Tracker ${isCloudMode ? 'Cloud' : 'Local'}</h1>
+        <h1 class="text-4xl font-extrabold text-center text-white mb-8">📈 Reventa Tracker Cloud</h1>
 
-        <!-- Controles de pestaña -->
+        <!-- Controles de pestaña: AHORA LLAMAN A setTab() -->
         <div class="flex gap-4 justify-center p-2 rounded-xl bg-slate-800 shadow-inner">
           <button onclick="setTab('panel')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'panel' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Panel</button>
           <button onclick="setTab('productos')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'productos' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Mis Productos</button>
@@ -403,13 +310,13 @@
         <!-- Contenido de las pestañas -->
         ${tab === "panel" ? `
         <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen del Inventario</h2>
-        <!-- Tarjetas de resumen -->
+        <!-- Tarjetas de resumen ajustadas para Dark Mode (bg-gray-800, text-400) -->
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-blue-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Invertido</h2><p class="text-2xl font-bold text-blue-400">€ ${formatPriceDisplay(invertido)}</p></div>
+          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-blue-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Invertido</h2><p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2).replace('.', ',')}</p></div>
           <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-green-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Vendidos</h2><p class="text-2xl font-bold text-green-400">${vendidos}</p></div>
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-purple-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Beneficio total</h2><p class="text-2xl font-bold text-purple-400">€ ${formatPriceDisplay(beneficioTotal)}</p></div>
+          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-purple-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Beneficio total</h2><p class="text-2xl font-bold text-purple-400">€ ${beneficioTotal.toFixed(2).replace('.', ',')}</p></div>
           <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-red-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Stock</h2><p class="text-2xl font-bold text-red-400">${stock}</p></div>
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-orange-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Valor sin vender</h2><p class="text-2xl font-bold text-orange-400">€ ${formatPriceDisplay(valorSinVender)}</p></div>
+          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-orange-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Valor sin vender</h2><p class="text-2xl font-bold text-orange-400">€ ${valorSinVender.toFixed(2).replace('.', ',')}</p></div>
         </div>
 
         <h2 class="text-2xl font-semibold text-gray-300 mt-6">Inventario Completo</h2>
@@ -430,27 +337,32 @@
             const vendidosConBeneficio = productos
                 .filter(p => p.vendido)
                 .map(p => {
+                    // Aseguramos que los valores sean números antes de restar
                     const beneficio = (parseFloat(p.precioVenta || 0) - parseFloat(p.precioCompra || 0));
                     return { ...p, beneficio: beneficio };
                 });
             
             let mejorProducto = null;
             if (vendidosConBeneficio.length > 0) {
+                // Ordenar para encontrar el producto con el mayor beneficio individual
                 mejorProducto = vendidosConBeneficio.sort((a, b) => b.beneficio - a.beneficio)[0];
             }
 
             return `
+            <!-- Ajuste para Dark Mode -->
             <div class="bg-gray-800 p-6 shadow-md rounded-xl border-l-4 border-purple-500">
               <h2 class="text-xl font-medium text-purple-400">🥇 Producto con más beneficio (Neto Individual)</h2>
               <p class="text-lg mt-1 font-semibold">${mejorProducto ? mejorProducto.nombre : 'No hay productos vendidos' } 
-              ${mejorProducto ? `(Beneficio: € ${formatPriceDisplay(mejorProducto.beneficio)})` : ''}
+              ${mejorProducto ? `(Beneficio: € ${mejorProducto.beneficio.toFixed(2).replace('.', ',')})` : ''}
               </p>
             </div>
             
+            <!-- Ajuste para Dark Mode -->
             <div class="bg-gray-800 p-6 shadow-md rounded-xl border-l-4 border-teal-500">
               <h2 class="text-xl font-medium text-teal-400">⏱️ Velocidad de venta</h2>
               ${productos.filter(p => p.vendido && p.fecha && p.fechaVenta).length ? (() => {
                 const vendidos = productos.filter(p => p.vendido && p.fecha && p.fechaVenta).map(p => {
+                  // Cálculo de días de diferencia
                   const dias = Math.ceil((new Date(p.fechaVenta) - new Date(p.fecha)) / 86400000);
                   return { ...p, dias };
                 });
@@ -466,16 +378,16 @@
       document.getElementById("app").innerHTML = appContent;
     }
 
-    // =================================================================
-    // INICIO DE LA APLICACIÓN
-    // =================================================================
-    initializeFirebase();
+    // INICIO DE LA APLICACIÓN: Inicia la escucha de datos en tiempo real
+    if (typeof initializeApp !== 'undefined') {
+        loadProductos();
+    }
     
     // =================================================================
     // EXPOSICIÓN GLOBAL (NECESARIO PARA ONCLICK EN HTML)
     // =================================================================
     // Exponemos las funciones necesarias al objeto window para que los eventos onclick del HTML puedan acceder a ellas.
-    window.setTab = setTab; 
+    window.setTab = setTab; // <-- Nuevo: Para manejar la navegación correctamente
     window.render = render;
     window.renderForm = renderForm;
     window.saveProducto = saveProducto;
