@@ -12,52 +12,107 @@
         font-family: 'Inter', sans-serif;
     }
     /* Estilo para ocultar el formulario mientras se carga Firebase */
-    #form-container { opacity: 0; transition: opacity 0.5s; }
-    .loaded #form-container { opacity: 1; }
+    #loading-overlay { 
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+        background-color: rgba(17, 24, 39, 0.95); /* bg-slate-900 con transparencia */
+        z-index: 50; 
+        display: flex; justify-content: center; align-items: center; 
+        color: white; 
+        font-size: 1.5rem;
+    }
+    .hidden { display: none !important; }
+
+    /* Animación simple de carga */
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: #3b82f6; /* blue-500 */
+      width: 40px;
+      height: 40px;
+      animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
-<!-- APLICO EL MODO OSCURO PRINCIPAL AQUÍ -->
 <body class="bg-slate-900 p-6 rounded-xl text-gray-100">
-  <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
-  <div id="form-container" class="max-w-6xl mx-auto"></div> 
+  <!-- Overlay de carga -->
+  <div id="loading-overlay">
+    <div class="flex flex-col items-center space-y-4">
+      <div class="spinner"></div>
+      <p>Conectando a la Nube...</p>
+    </div>
+  </div>
+
+  <div id="app" class="max-w-6xl mx-auto space-y-6 hidden"></div>
+  <div id="form-container" class="max-w-6xl mx-auto hidden"></div> 
 
   <!-- Todo el JavaScript ahora está en un solo bloque 'type="module"' -->
   <script type="module">
     // =================================================================
-    // 1. INCLUIR LIBRERÍAS DE FIREBASE (V9 modular con imports)
+    // 1. INCLUIR LIBRERÍAS DE FIREBASE
     // =================================================================
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-    import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, FieldValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+    import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
 
     // =================================================================
     // CONFIGURACIÓN DE FIREBASE Y CONEXIÓN
     // =================================================================
-    // NOTA: Reemplaza estas credenciales con las tuyas.
-    const firebaseConfig = {
-        apiKey: "AIzaSyDjTf3MR6Hn6G5igOQocjLb2cW6kogaeM4",
-        authDomain: "reventa-de8be.firebaseapp.com",
-        projectId: "reventa-de8be",
-        storageBucket: "reventa-de8be.firebasestorage.app",
-        messagingSenderId: "396010674100",
-        appId: "1:396010674100:web:28532dafe6f223969404e1"
-    };
-
+    // OBTENER CONFIGURACIÓN DESDE EL ENTORNO (Crucial para el correcto funcionamiento)
+    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    
     let db; 
-    let COLLECTION_NAME = "productosReventa";
+    let auth;
+    let userId = 'anonymous'; 
+    let COLLECTION_PATH;
 
-    // Inicializar Firebase y Firestore
-    try {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-    } catch (error) {
-        console.error("Error al inicializar Firebase: ", error);
-        document.getElementById('app').innerHTML = `
-            <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative" role="alert">
-              <strong class="font-bold">¡Error de conexión!</strong>
-              <span class="block sm:inline">No se pudo inicializar Firebase. Revise la consola.</span>
-            </div>
-        `;
+    // Inicializar Firebase, autenticación y Firestore
+    async function initializeFirebase() {
+        const overlay = document.getElementById('loading-overlay');
+        const appEl = document.getElementById('app');
+        const formEl = document.getElementById('form-container');
+
+        try {
+            if (!firebaseConfig.projectId) {
+                throw new Error("Configuración de Firebase no encontrada. ¿Estás en un entorno Canvas?");
+            }
+
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // Autenticación anónima obligatoria
+            await signInAnonymously(auth);
+            userId = auth.currentUser.uid;
+            
+            // Ruta de la colección: /artifacts/{appId}/users/{userId}/reventa_items
+            COLLECTION_PATH = `artifacts/${appId}/users/${userId}/reventa_items`;
+            
+            // Quita el overlay de carga y muestra la UI principal
+            overlay.classList.add('hidden');
+            appEl.classList.remove('hidden');
+            formEl.classList.remove('hidden');
+
+            // Iniciar la carga de productos en tiempo real
+            loadProductos();
+
+        } catch (error) {
+            console.error("Error FATAL al inicializar Firebase o Autenticación: ", error);
+            overlay.innerHTML = `
+                <div class="bg-red-900 border border-red-700 text-red-300 px-6 py-4 rounded-xl relative shadow-2xl">
+                  <strong class="font-bold">¡Error de Conexión!</strong>
+                  <span class="block mt-1">No se pudo inicializar Firebase. Revise la consola.</span>
+                  <span class="block text-sm mt-2">Error: ${error.message}</span>
+                </div>
+            `;
+            // Asegúrate de que los elementos de la app no se muestren si falla
+            appEl.classList.add('hidden');
+            formEl.classList.add('hidden');
+        }
     }
 
 
@@ -71,6 +126,7 @@
     const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
     let form = { ...emptyForm };
     
+    // setFormField ya NO llama a render() para evitar perder el foco del input
     function setFormField(field, value) {
       form[field] = value;
     }
@@ -107,25 +163,30 @@
 
     // Carga inicial y listener en tiempo real
     function loadProductos() {
-      if (!db) return; 
+      if (!db || !COLLECTION_PATH) return; 
 
       try {
-        const colRef = collection(db, COLLECTION_NAME);
+        const colRef = collection(db, COLLECTION_PATH);
 
+        // onSnapshot escucha los cambios en tiempo real
         onSnapshot(colRef, (snapshot) => {
             // Mapea los documentos de Firestore al estado local 'productos'
             productos = snapshot.docs.map(doc => ({ 
               id: doc.id, 
               ...doc.data(),
+              // Aseguramos que los campos existan, ya que los nuevos productos aún no tienen valor
               precioCompra: doc.data().precioCompra || "",
               precioVenta: doc.data().precioVenta || "",
-              valorVenta: doc.data().valorVenta || ""
+              valorVenta: doc.data().valorVenta || "",
+              fecha: doc.data().fecha || "",
+              fechaVenta: doc.data().fechaVenta || ""
             }));
 
-            // Una vez cargado, muestra el formulario y la app
-            document.body.classList.add('loaded');
+            // Re-renderiza la UI con los datos frescos de la base de datos
             renderForm();
             render();
+            console.log(`Productos cargados (${productos.length}). UI actualizada.`);
+
         }, (error) => {
             console.error("Error al cargar productos en tiempo real: ", error);
             document.getElementById('app').innerHTML = `
@@ -144,7 +205,7 @@
     // Guarda o actualiza un producto en Firestore
     async function saveProducto() {
       if (!db) {
-         console.error("Error: La conexión a la base de datos no está activa.");
+         document.getElementById('form-error').innerHTML = '<div class="text-red-400 font-medium">❌ La base de datos no está conectada.</div>';
          return;
       }
 
@@ -168,38 +229,62 @@
       document.getElementById('form-error').innerHTML = '';
       
       const isVendido = !!productoToSave.precioVenta;
-      // Añade el campo 'vendido' y la marca de tiempo de actualización (V9)
-      const dataToSave = { ...productoToSave, vendido: isVendido, updatedAt: FieldValue.serverTimestamp() };
+      
+      // CORRECCIÓN CRUCIAL: Usamos serverTimestamp() importado de 'firebase/firestore'
+      const dataToSave = { 
+        ...productoToSave, 
+        vendido: isVendido, 
+        updatedAt: serverTimestamp() 
+      };
+
+      const isNew = !editing;
 
       try {
         if (editing) {
           // Actualizar documento existente
-          const docRef = doc(db, COLLECTION_NAME, editing);
+          const docRef = doc(db, COLLECTION_PATH, editing);
           await updateDoc(docRef, dataToSave);
         } else {
           // Añadir nuevo documento
-          await addDoc(collection(db, COLLECTION_NAME), dataToSave);
+          await addDoc(collection(db, COLLECTION_PATH), dataToSave);
         }
 
         // 2. Resetear el formulario tras guardar
         form = { ...emptyForm };
         editing = null; 
         renderForm(); 
-        console.log("Producto guardado con éxito.");
+        
+        // Muestra mensaje de éxito (temporal, onSnapshot se encargará de refrescar la tabla)
+        document.getElementById('form-error').innerHTML = `<div class="text-green-400 font-medium">✅ Producto ${isNew ? 'añadido' : 'actualizado'} con éxito.</div>`;
+        console.log("Producto guardado con éxito en Firestore.");
+
+        // Elimina el mensaje de éxito después de 3 segundos
+        setTimeout(() => {
+          document.getElementById('form-error').innerHTML = '';
+        }, 3000);
 
       } catch (error) {
         console.error("Error al guardar producto en Firestore:", error);
         // Muestra error detallado en la UI
-        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar: ${error.message}. ¿Reglas de Seguridad?</div>`;
+        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar: ${error.message}.</div>`;
       }
     }
 
     // Carga los datos de un producto en el formulario para editar
     function editProducto(p) {
       editing = p.id;
-      form = { ...p }; 
-      renderForm(); 
-      // Desplaza al formulario para empezar a editar
+      // Limpiar mensaje de error/éxito
+      document.getElementById('form-error').innerHTML = '';
+      
+      // Usamos los datos originales del producto
+      form = { 
+          ...p,
+          // Aseguramos que los campos numéricos sean cadenas para los inputs
+          precioCompra: p.precioCompra.toString(),
+          precioVenta: p.precioVenta.toString(),
+          valorVenta: p.valorVenta.toString()
+      }; 
+      renderForm(); // Vuelve a dibujar el formulario con los datos a editar
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -211,6 +296,7 @@
     function renderForm() {
       const inputClasses = "border border-gray-700 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition bg-slate-700 text-white";
       
+      // Muestra el formulario SOLO si la pestaña es 'panel'
       const formHTML = tab === "panel" ? `
         <div id="resale-form" class="bg-gray-800 shadow-lg rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-4 mb-3 transition transform hover:scale-[1.01] duration-300">
           <input class="${inputClasses}" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
@@ -307,6 +393,9 @@
           <button onclick="setTab('estadisticas')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'estadisticas' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Estadísticas</button>
         </div>
 
+        <!-- Muestra el ID de usuario para referencia -->
+        <p class="text-sm text-center text-gray-500 mt-4">Usuario (ID Anónimo): ${userId}</p>
+
         <!-- Contenido de las pestañas -->
         ${tab === "panel" ? `
         <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen del Inventario</h2>
@@ -378,16 +467,16 @@
       document.getElementById("app").innerHTML = appContent;
     }
 
-    // INICIO DE LA APLICACIÓN: Inicia la escucha de datos en tiempo real
-    if (typeof initializeApp !== 'undefined') {
-        loadProductos();
-    }
+    // =================================================================
+    // INICIO DE LA APLICACIÓN
+    // =================================================================
+    initializeFirebase();
     
     // =================================================================
     // EXPOSICIÓN GLOBAL (NECESARIO PARA ONCLICK EN HTML)
     // =================================================================
     // Exponemos las funciones necesarias al objeto window para que los eventos onclick del HTML puedan acceder a ellas.
-    window.setTab = setTab; // <-- Nuevo: Para manejar la navegación correctamente
+    window.setTab = setTab; 
     window.render = render;
     window.renderForm = renderForm;
     window.saveProducto = saveProducto;
