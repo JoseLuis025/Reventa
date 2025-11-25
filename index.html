@@ -22,6 +22,7 @@
   <script>
     // =================================================================
     // CONFIGURACIÓN Y PERSISTENCIA (USANDO LOCALSTORAGE)
+    // ESTA VERSIÓN NO USA FIREBASE, POR LO QUE NO DARÁ EL ERROR FIELDVALUE
     // =================================================================
     const LOCAL_STORAGE_KEY = "productosReventa";
 
@@ -45,7 +46,7 @@
       return priceString.toString().replace(/,/g, '.').replace(/[^\d.]/g, '');
     }
 
-    // 💡 SOLUCIÓN CLAVE 1: setFormField ya NO llama a render() para evitar perder el foco del input
+    // setFormField ya NO llama a render() para evitar perder el foco del input
     function setFormField(field, value) {
       form[field] = value;
       // No renderizamos, solo actualizamos el objeto 'form'
@@ -75,6 +76,10 @@
 
     // Guarda o actualiza un producto en localStorage
     function saveProducto() {
+      // Limpiar errores o mensajes previos
+      const formErrorEl = document.getElementById('form-error');
+      if (formErrorEl) formErrorEl.innerHTML = '';
+
       // 1. Normalizar y validar
       const precioCompraNormalizado = normalizePrice(form.precioCompra);
 
@@ -87,19 +92,19 @@
 
       if (!productoToSave.nombre || isNaN(parseFloat(precioCompraNormalizado))) {
         // Muestra error en la UI si faltan datos esenciales
-        document.getElementById('form-error').innerHTML = '<div class="text-red-400 font-medium">❌ Debes rellenar el nombre y el precio de compra con un número válido.</div>';
+        if (formErrorEl) formErrorEl.innerHTML = '<div class="text-red-400 font-medium">❌ Debes rellenar el nombre y el precio de compra con un número válido.</div>';
         return;
       }
-      
-      document.getElementById('form-error').innerHTML = '';
       
       const isVendido = !!productoToSave.precioVenta;
       const dataToSave = { 
         ...productoToSave, 
         vendido: isVendido,
-        // En localStorage, a menudo usamos un ID simple basado en tiempo para nuevos elementos
+        // Usamos Date.now() para generar un ID único
         id: editing || Date.now().toString()
       };
+
+      const isNew = !editing;
 
       try {
         if (editing) {
@@ -113,22 +118,30 @@
         // 2. Guardar en localStorage y actualizar UI
         saveLS();
 
-        // 💡 SOLUCIÓN CLAVE 2: Resetear el formulario y LLAMAR EXPLICITAMENTE a renderForm()
+        // CORRECCIÓN CRUCIAL: Resetear el formulario para limpiar todos los campos
         form = { ...emptyForm };
         editing = null; 
-        renderForm(); // <-- Vuelve a dibujar el formulario vacío o de añadir
+        
+        // Mostrar mensaje de éxito
+        if (formErrorEl) formErrorEl.innerHTML = `<div class="text-green-400 font-medium">✅ Producto ${isNew ? 'añadido' : 'actualizado'} con éxito.</div>`;
+
+        renderForm(); // Vuelve a dibujar el formulario vacío
         render(); // Volver a dibujar la tabla con los nuevos datos
         console.log("Producto guardado con éxito en localStorage.");
 
       } catch (error) {
         console.error("Error al guardar producto en localStorage:", error);
-        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar localmente: ${error.message}.</div>`;
+        if (formErrorEl) formErrorEl.innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar localmente: ${error.message}.</div>`;
       }
     }
 
     // Carga los datos de un producto en el formulario para editar
     function editProducto(p) {
       editing = p.id;
+      // Limpiar mensaje de error/éxito
+      const formErrorEl = document.getElementById('form-error');
+      if (formErrorEl) formErrorEl.innerHTML = '';
+      
       // Usamos los datos originales del producto
       form = { 
           ...p,
@@ -137,7 +150,7 @@
           precioVenta: p.precioVenta.toString(),
           valorVenta: p.valorVenta.toString()
       }; 
-      renderForm(); // <-- Vuelve a dibujar el formulario con los datos a editar
+      renderForm(); // Vuelve a dibujar el formulario con los datos a editar
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -145,7 +158,7 @@
     // RENDERIZADO DE LA UI
     // =================================================================
 
-    // 💡 SOLUCIÓN CLAVE 3: Implementación de renderForm() para gestionar solo el formulario
+    // Implementación de renderForm() para gestionar solo el formulario
     function renderForm() {
       const inputClasses = "border border-gray-700 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition bg-slate-700 text-white";
       
@@ -326,7 +339,5 @@
     window.editProducto = editProducto;
 
   </script>
-</body>
-</html>
 </body>
 </html>
