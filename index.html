@@ -1,30 +1,33 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Reventa Tracker - Cloud</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
   <style>
     body { font-family: 'Inter', sans-serif; }
-    #form-container { opacity: 0; transition: opacity 0.5s; }
+    #form-container { opacity: 0; transition: opacity .35s; }
     .loaded #form-container { opacity: 1; }
+    /* Ajustes para que el texto en filas vendidas se vea bien */
+    .row-vendido { background-color: rgba(4, 120, 87, 0.12); } /* verde translúcido */
+    .row-vendido td { color: #e6fffa; } /* texto claro para contraste */
+    /* Si prefieres texto oscuro sobre relleno claro, cámbialo a: color: #064e3b; */
+    .table-scroll { overflow-x:auto; }
   </style>
 </head>
-
 <body class="bg-slate-900 p-6 rounded-xl text-gray-100">
+
   <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
-  <div id="form-container" class="max-w-6xl mx-auto"></div> 
+  <div id="form-container" class="max-w-6xl mx-auto"></div>
 
   <script type="module">
-
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
     import {
-      getFirestore, collection, onSnapshot, addDoc, doc, updateDoc,
-      serverTimestamp
+      getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
+    // --- CONFIG FIREBASE: usa tu config real (la tuya ya estaba en el proyecto)
     const firebaseConfig = {
         apiKey: "AIzaSyDjTf3MR6Hn6G5igOQocjLb2cW6kogaeM4",
         authDomain: "reventa-de8be.firebaseapp.com",
@@ -34,235 +37,295 @@
         appId: "1:396010674100:web:28532dafe6f223969404e1"
     };
 
-    let db; 
-    let COLLECTION_NAME = "productosReventa";
+    let db;
+    const COLLECTION_NAME = "productosReventa";
 
     try {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-    } catch (error) {
-        console.error("Error al inicializar Firebase: ", error);
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+    } catch (e) {
+      console.error("Firebase init error:", e);
     }
 
+    // Estado local
     let productos = [];
     let tab = "panel";
     let editing = null;
-
     const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
     let form = { ...emptyForm };
 
+    // Utilidades
     function setFormField(field, value) { form[field] = value; }
-    function setTab(newTab) { tab = newTab; editing = null; form = { ...emptyForm }; renderForm(); render(); }
+    function setTab(newTab) { tab = newTab; editing = null; form = {...emptyForm}; renderForm(); render(); }
+    function normalizePrice(s) { if (!s) return ""; return s.toString().replace(/,/g,'.').replace(/[^\d.]/g,''); }
+    function formatPriceDisplay(v) { const n = parseFloat(v); if (isNaN(n)) return '-'; return n.toLocaleString('es-ES',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 
-    function normalizePrice(priceString) {
-      if (!priceString) return "";
-      return priceString.toString().replace(/,/g, '.').replace(/[^\d.]/g, '');
-    }
-
-    const formatPriceDisplay = (priceString) => {
-        const num = parseFloat(priceString);
-        if (isNaN(num)) return '-';
-        return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    };
-
+    // Cargar productos en tiempo real
     function loadProductos() {
-      if (!db) return; 
+      if (!db) return;
       try {
         const colRef = collection(db, COLLECTION_NAME);
-
         onSnapshot(colRef, (snapshot) => {
-            productos = snapshot.docs.map(doc => ({ 
-              id: doc.id, 
-              ...doc.data(),
-              precioCompra: doc.data().precioCompra || "",
-              precioVenta: doc.data().precioVenta || "",
-              valorVenta: doc.data().valorVenta || ""
-            }));
-
-            document.body.classList.add('loaded');
-            renderForm();
-            render();
+          productos = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          document.body.classList.add('loaded');
+          renderForm();
+          render();
+        }, (err) => {
+          console.error("Error snapshot:", err);
         });
-      } catch (error) {
-        console.error("Error al iniciar snapshot: ", error);
-      }
+      } catch (err) { console.error(err); }
     }
 
+    // Guardar / actualizar
     async function saveProducto() {
       if (!db) return;
-
       const precioCompraNormalizado = normalizePrice(form.precioCompra);
-
       const productoToSave = {
         ...form,
         precioCompra: precioCompraNormalizado,
         precioVenta: normalizePrice(form.precioVenta),
-        valorVenta: normalizePrice(form.valorVenta),
+        valorVenta: normalizePrice(form.valorVenta)
       };
-
       if (!productoToSave.nombre || isNaN(parseFloat(precioCompraNormalizado))) {
-        document.getElementById('form-error').innerHTML =
-          '<div class="text-red-400 font-medium">❌ Debes rellenar el nombre y el precio de compra.</div>';
+        document.getElementById('form-error').innerHTML = '<div class="text-red-400 font-medium">❌ Debes rellenar nombre y precio de compra válido.</div>';
         return;
       }
-      
       document.getElementById('form-error').innerHTML = '';
-      
       const isVendido = !!productoToSave.precioVenta;
-      const dataToSave = { 
-        ...productoToSave,
-        vendido: isVendido,
-        updatedAt: serverTimestamp()
-      };
-
+      const dataToSave = { ...productoToSave, vendido: isVendido, updatedAt: serverTimestamp() };
       try {
         if (editing) {
-          const docRef = doc(db, COLLECTION_NAME, editing);
-          await updateDoc(docRef, dataToSave);
+          await updateDoc(doc(db, COLLECTION_NAME, editing), dataToSave);
         } else {
           await addDoc(collection(db, COLLECTION_NAME), dataToSave);
         }
-
         form = { ...emptyForm };
-        editing = null; 
-        renderForm(); 
-
-      } catch (error) {
-        console.error("Error al guardar:", error);
+        editing = null;
+        renderForm();
+      } catch (err) {
+        console.error("Error saving:", err);
+        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar: ${err.message}</div>`;
       }
     }
 
-    function editProducto(p) {
+    // Edición por id (seguro para onclick)
+    function editProductoById(id) {
+      const p = productos.find(x => x.id === id);
+      if (!p) return;
       editing = p.id;
       form = { ...p };
       renderForm();
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+    window.editProductoById = editProductoById;
 
+    // render form
     function renderForm() {
       const inputClasses = "border border-gray-700 p-2 rounded-lg bg-slate-700 text-white";
-
       const formHTML = tab === "panel" ? `
         <div id="resale-form" class="bg-gray-800 rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-4 mb-3">
-          <input class="${inputClasses}" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
-          <input class="${inputClasses}" placeholder="Precio compra (€)" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
-          <input class="${inputClasses}" placeholder="Precio venta (€)" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
-          <input class="${inputClasses}" placeholder="Valor venta (€)" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
-          <input class="${inputClasses}" type="date" placeholder="Fecha compra" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
-          <input class="${inputClasses}" type="date" placeholder="Fecha venta" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
-          <input class="${inputClasses} md:col-span-2" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
-          
+          <input class="${inputClasses}" placeholder="Producto" value="${escapeHtml(form.nombre||'')}" oninput="setFormField('nombre', this.value)" />
+          <input class="${inputClasses}" placeholder="Precio compra (€)" value="${form.precioCompra||''}" oninput="setFormField('precioCompra', this.value)" />
+          <input class="${inputClasses}" placeholder="Precio venta (€)" value="${form.precioVenta||''}" oninput="setFormField('precioVenta', this.value)" />
+          <input class="${inputClasses}" placeholder="Valor venta (€)" value="${form.valorVenta||''}" oninput="setFormField('valorVenta', this.value)" />
+          <input class="${inputClasses}" type="date" placeholder="Fecha compra" value="${form.fecha||''}" oninput="setFormField('fecha', this.value)" />
+          <input class="${inputClasses}" type="date" placeholder="Fecha venta" value="${form.fechaVenta||''}" oninput="setFormField('fechaVenta', this.value)" />
+          <input class="${inputClasses} md:col-span-2" placeholder="Notas" value="${escapeHtml(form.notas||'')}" oninput="setFormField('notas', this.value)" />
           <div id="form-error" class="md:col-span-7"></div>
-
           <button class="w-full md:col-span-7 bg-blue-600 text-white font-semibold rounded-lg py-3" onclick="saveProducto()">
             ${editing ? "💾 Guardar cambios" : "➕ Añadir producto"}
           </button>
         </div>` : "";
-
-      document.getElementById("form-container").innerHTML = formHTML;
+      document.getElementById('form-container').innerHTML = formHTML;
     }
 
+    // ESCAPAR HTML para evitar inyección en atributos value/innerHTML
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"'`=\/]/g, function(s) {
+        return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','=':'&#x3D;','`':'&#x60;' })[s];
+      });
+    }
+
+    // Render tabla (usada en Panel y en Mis Productos - con flag para incluir columna %)
+    function renderTabla(lista, incluirPorcentaje = false) {
+      if (!lista || lista.length === 0) {
+        return '<p class="text-center text-gray-400 p-8 bg-gray-800 rounded-xl shadow">No hay productos registrados.</p>';
+      }
+
+      const rows = lista.map(p => {
+        const compra = parseFloat(p.precioCompra||0) || 0;
+        const venta = parseFloat(p.precioVenta||0) || 0;
+        const beneficio = (venta - compra);
+        let porcentaje = 'N/A';
+        if (compra !== 0 && p.vendido) {
+          porcentaje = ((beneficio / compra) * 100).toFixed(1) + '%';
+        }
+
+        // clase fila vendida
+        const rowClass = p.vendido ? 'row-vendido' : '';
+
+        return `
+          <tr class="${rowClass} border-t border-gray-700">
+            <td class="p-3 text-left align-top">${escapeHtml(p.nombre||'-')}</td>
+            <td class="p-3 text-left align-top">${p.fecha || '-'}</td>
+            <td class="p-3 text-right align-top">€ ${formatPriceDisplay(p.precioCompra)}</td>
+            <td class="p-3 text-right align-top">${p.precioVenta ? '€ ' + formatPriceDisplay(p.precioVenta) : '-'}</td>
+            <td class="p-3 text-left align-top">${p.fechaVenta || '-'}</td>
+            <td class="p-3 text-center align-top">${p.vendido ? '✅ Sí' : '❌ No'}</td>
+            <td class="p-3 text-right align-top font-semibold">${beneficio.toFixed(2).replace('.',',')} €</td>
+            ${ incluirPorcentaje ? `<td class="p-3 text-right align-top">${porcentaje}</td>` : '' }
+            <td class="p-3 text-sm text-gray-400 align-top max-w-xs overflow-hidden">${escapeHtml(p.notas||'-')}</td>
+            <td class="p-3 text-center align-top">
+              <button class="bg-blue-500 text-white text-sm px-3 py-1 rounded-full hover:bg-blue-600" onclick="editProductoById('${p.id}')">Editar</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const porcentajeHeader = incluirPorcentaje ? '<th class="p-3 text-right">% Beneficio</th>' : '';
+
+      return `
+        <div class="table-scroll">
+          <table class="min-w-full bg-gray-800 rounded-xl shadow-lg border border-gray-700">
+            <thead class="bg-gray-700 text-gray-200">
+              <tr>
+                <th class="p-3 text-left">Producto</th>
+                <th class="p-3 text-left">Fecha compra</th>
+                <th class="p-3 text-right">Precio compra</th>
+                <th class="p-3 text-right">Precio venta</th>
+                <th class="p-3 text-left">Fecha venta</th>
+                <th class="p-3 text-center">Vendido</th>
+                <th class="p-3 text-right">Beneficio</th>
+                ${porcentajeHeader}
+                <th class="p-3 text-left">Notas</th>
+                <th class="p-3 text-center">Editar</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // Render para "Mis Productos" (incluye %)
     function renderProductos() {
-      if (productos.length === 0) {
-        return `<p class="text-gray-400 text-center mt-8">No hay productos.</p>`;
+      return renderTabla(productos, true);
+    }
+
+    // Estadísticas: producto con más beneficio, más rápido y más lento vendido
+    function renderEstadisticas() {
+      if (!productos || productos.length === 0) {
+        return '<p class="text-gray-400 text-center mt-8">Añade productos para ver estadísticas.</p>';
+      }
+
+      // producto con más beneficio (solo vendidos o todos? pediste "producto con más beneficio" -> lo calculo entre vendidos y no vendidos (beneficio estimado con precioVenta si existe, si no 0))
+      const vendidosConDatos = productos.filter(p => p.vendido && p.precioVenta);
+      const candidatosBenef = vendidosConDatos.length > 0 ? vendidosConDatos : productos; // preferimos los vendidos, si no tomamos todos
+
+      const withBenef = candidatosBenef.map(p => {
+        const compra = parseFloat(p.precioCompra||0) || 0;
+        const venta = parseFloat(p.precioVenta||0) || 0;
+        return { ...p, beneficio: (venta - compra) };
+      });
+
+      const mejor = withBenef.reduce((a,b) => (a && a.beneficio > b.beneficio) ? a : b, withBenef[0]);
+
+      // velocidad de venta (necesitamos fecha y fechaVenta)
+      const vendidosConFechas = productos.filter(p => p.vendido && p.fecha && p.fechaVenta).map(p => {
+        const dias = Math.round((new Date(p.fechaVenta) - new Date(p.fecha)) / 86400000);
+        return { ...p, dias: dias >= 0 ? dias : 0 };
+      });
+
+      let masRapido = null, masLento = null;
+      if (vendidosConFechas.length > 0) {
+        masRapido = vendidosConFechas.reduce((a,b) => a.dias < b.dias ? a : b, vendidosConFechas[0]);
+        masLento  = vendidosConFechas.reduce((a,b) => a.dias > b.dias ? a : b, vendidosConFechas[0]);
       }
 
       return `
-        <div class="mt-6">
-          ${productos.map(p => `
-            <div class="bg-gray-800 p-4 rounded-xl mb-3 border border-gray-700">
-              <div class="flex justify-between items-center">
-                <div>
-                  <h3 class="text-xl font-bold text-white">${p.nombre}</h3>
-                  <p class="text-gray-400 text-sm">Comprado: €${formatPriceDisplay(p.precioCompra)}</p>
-                  <p class="text-gray-400 text-sm">Vendido: ${p.precioVenta ? "€"+formatPriceDisplay(p.precioVenta) : "⛔ No"}</p>
-                </div>
-                <button onclick="editProducto(${JSON.stringify(p)})" class="bg-blue-600 px-4 py-2 rounded-lg">✏ Editar</button>
-              </div>
-            </div>
-          `).join('')}
+        <div class="space-y-6 mt-6">
+          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-purple-500">
+            <h3 class="text-lg text-purple-300">🥇 Producto con más beneficio (neto)</h3>
+            <p class="text-xl font-semibold mt-2">${mejor ? escapeHtml(mejor.nombre) + (mejor.beneficio !== undefined ? ` — € ${mejor.beneficio.toFixed(2).replace('.',',')}` : '') : 'No hay datos'}</p>
+          </div>
+
+          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-teal-500">
+            <h3 class="text-lg text-teal-300">⏱️ Velocidad de venta</h3>
+            ${ masRapido && masLento ? `
+              <p class="mt-2 text-gray-200"><strong>🚀 Más rápido:</strong> ${escapeHtml(masRapido.nombre)} — ${masRapido.dias} días</p>
+              <p class="mt-1 text-gray-200"><strong>🐢 Más lento:</strong> ${escapeHtml(masLento.nombre)} — ${masLento.dias} días</p>
+            ` : '<p class="text-gray-400 mt-2">No hay suficientes ventas con fecha de compra y venta.</p>'}
+          </div>
         </div>
       `;
     }
 
-    function renderEstadisticas() {
-      const total = productos.length;
-      const vendidos = productos.filter(p => p.vendido).length;
-      const pendientes = total - vendidos;
-
-      return `
-        <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-
-          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-blue-500">
-            <h3 class="text-lg text-gray-400">Total productos</h3>
-            <p class="text-3xl font-bold">${total}</p>
-          </div>
-
-          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-green-500">
-            <h3 class="text-lg text-gray-400">Vendidos</h3>
-            <p class="text-3xl font-bold">${vendidos}</p>
-          </div>
-
-          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-yellow-500">
-            <h3 class="text-lg text-gray-400">Pendientes</h3>
-            <p class="text-3xl font-bold">${pendientes}</p>
-          </div>
-
-        </div>
-      `;
-    }
-
+    // Render principal (panel / productos / estadísticas)
     function render() {
+      const invertido = productos.reduce((acc,p) => acc + (parseFloat(p.precioCompra||0) || 0), 0);
+      const vendidosCount = productos.filter(p => p.vendido).length;
+      const beneficioTotal = productos.reduce((acc,p) => acc + (((parseFloat(p.precioVenta||0) || 0) - (parseFloat(p.precioCompra||0) || 0)) || 0), 0);
 
-      const invertido = productos.reduce((a,p)=>a+parseFloat(p.precioCompra||0),0);
-      const vendidos = productos.filter(p=>p.vendido).length;
-      const beneficioTotal = productos.reduce((a,p)=>a+((parseFloat(p.precioVenta||0)-parseFloat(p.precioCompra||0))||0),0);
-
-      const appContent = `
+      const header = `
         <h1 class="text-4xl font-extrabold text-center text-white mb-8">📈 Reventa Tracker Cloud</h1>
-
         <div class="flex gap-4 justify-center p-2 bg-slate-800 rounded-xl">
           <button onclick="setTab('panel')" class="px-5 py-2 rounded-full ${tab==='panel'?'bg-blue-600 text-white':'text-gray-300'}">Panel</button>
           <button onclick="setTab('productos')" class="px-5 py-2 rounded-full ${tab==='productos'?'bg-blue-600 text-white':'text-gray-300'}">Mis Productos</button>
           <button onclick="setTab('estadisticas')" class="px-5 py-2 rounded-full ${tab==='estadisticas'?'bg-blue-600 text-white':'text-gray-300'}">Estadísticas</button>
         </div>
-
-        ${
-          tab==="panel"
-          ? `
-              <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen</h2>
-              <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-                <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-blue-500">
-                  <h2 class="text-lg text-gray-400">Invertido</h2>
-                  <p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2)}</p>
-                </div>
-                <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-green-500">
-                  <h2 class="text-lg text-gray-400">Vendidos</h2>
-                  <p class="text-2xl font-bold text-green-400">${vendidos}</p>
-                </div>
-                <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-purple-500">
-                  <h2 class="text-lg text-gray-400">Beneficio total</h2>
-                  <p class="text-2xl font-bold text-purple-400">€ ${beneficioTotal.toFixed(2)}</p>
-                </div>
-              </div>
-            `
-          : tab==="productos"
-          ? renderProductos()
-          : renderEstadisticas()
-        }
       `;
 
-      document.getElementById("app").innerHTML = appContent;
+      const panelResumen = `
+        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen</h2>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
+          <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-blue-500">
+            <h2 class="text-lg text-gray-400">Invertido</h2>
+            <p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2)}</p>
+          </div>
+          <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-green-500">
+            <h2 class="text-lg text-gray-400">Vendidos</h2>
+            <p class="text-2xl font-bold text-green-400">${vendidosCount}</p>
+          </div>
+          <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-purple-500 md:col-span-3">
+            <h2 class="text-lg text-gray-400">Beneficio total</h2>
+            <p class="text-2xl font-bold text-purple-400">€ ${beneficioTotal.toFixed(2)}</p>
+          </div>
+        </div>
+
+        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Inventario Completo</h2>
+        <div class="mt-4">
+          ${renderTabla(productos, false)}
+        </div>
+      `;
+
+      const productosView = `
+        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Detalle de Productos</h2>
+        <div class="mt-4">
+          ${renderProductos()}
+        </div>
+      `;
+
+      const estadView = `
+        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Estadísticas Clave</h2>
+        <div>${renderEstadisticas()}</div>
+      `;
+
+      const content = header + (tab === 'panel' ? panelResumen : tab === 'productos' ? productosView : estadView);
+      document.getElementById('app').innerHTML = content;
     }
 
-    loadProductos();
-
+    // Exponer funciones
     window.setTab = setTab;
     window.render = render;
     window.renderForm = renderForm;
     window.saveProducto = saveProducto;
     window.setFormField = setFormField;
-    window.editProducto = editProducto;
+    window.editProducto = editProductoById;
+
+    // Arrancar
+    loadProductos();
 
   </script>
 </body>
