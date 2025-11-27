@@ -3,13 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reventa Tracker - Sincronizado en la Nube</title>
+  <title>Reventa Tracker - Cloud</title>
   <script src="https://cdn.tailwindcss.com"></script>
 
   <style>
-    body {
-        font-family: 'Inter', sans-serif;
-    }
+    body { font-family: 'Inter', sans-serif; }
     #form-container { opacity: 0; transition: opacity 0.5s; }
     .loaded #form-container { opacity: 1; }
   </style>
@@ -52,18 +50,9 @@
 
     const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
     let form = { ...emptyForm };
-    
+
     function setFormField(field, value) { form[field] = value; }
-    
-    function setTab(newTab) {
-      tab = newTab;
-      if (newTab !== 'panel') {
-          editing = null;
-          form = { ...emptyForm };
-      }
-      renderForm();
-      render();
-    }
+    function setTab(newTab) { tab = newTab; editing = null; form = { ...emptyForm }; renderForm(); render(); }
 
     function normalizePrice(priceString) {
       if (!priceString) return "";
@@ -173,6 +162,56 @@
       document.getElementById("form-container").innerHTML = formHTML;
     }
 
+    function renderProductos() {
+      if (productos.length === 0) {
+        return `<p class="text-gray-400 text-center mt-8">No hay productos.</p>`;
+      }
+
+      return `
+        <div class="mt-6">
+          ${productos.map(p => `
+            <div class="bg-gray-800 p-4 rounded-xl mb-3 border border-gray-700">
+              <div class="flex justify-between items-center">
+                <div>
+                  <h3 class="text-xl font-bold text-white">${p.nombre}</h3>
+                  <p class="text-gray-400 text-sm">Comprado: €${formatPriceDisplay(p.precioCompra)}</p>
+                  <p class="text-gray-400 text-sm">Vendido: ${p.precioVenta ? "€"+formatPriceDisplay(p.precioVenta) : "⛔ No"}</p>
+                </div>
+                <button onclick="editProducto(${JSON.stringify(p)})" class="bg-blue-600 px-4 py-2 rounded-lg">✏ Editar</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderEstadisticas() {
+      const total = productos.length;
+      const vendidos = productos.filter(p => p.vendido).length;
+      const pendientes = total - vendidos;
+
+      return `
+        <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+
+          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-blue-500">
+            <h3 class="text-lg text-gray-400">Total productos</h3>
+            <p class="text-3xl font-bold">${total}</p>
+          </div>
+
+          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-green-500">
+            <h3 class="text-lg text-gray-400">Vendidos</h3>
+            <p class="text-3xl font-bold">${vendidos}</p>
+          </div>
+
+          <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-yellow-500">
+            <h3 class="text-lg text-gray-400">Pendientes</h3>
+            <p class="text-3xl font-bold">${pendientes}</p>
+          </div>
+
+        </div>
+      `;
+    }
+
     function render() {
 
       const invertido = productos.reduce((a,p)=>a+parseFloat(p.precioCompra||0),0);
@@ -188,24 +227,29 @@
           <button onclick="setTab('estadisticas')" class="px-5 py-2 rounded-full ${tab==='estadisticas'?'bg-blue-600 text-white':'text-gray-300'}">Estadísticas</button>
         </div>
 
-        ${tab==="panel"?`
-          <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen</h2>
-          <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-            <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-blue-500">
-              <h2 class="text-lg text-gray-400">Invertido</h2>
-              <p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2)}</p>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-green-500">
-              <h2 class="text-lg text-gray-400">Vendidos</h2>
-              <p class="text-2xl font-bold text-green-400">${vendidos}</p>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-purple-500">
-              <h2 class="text-lg text-gray-400">Beneficio total</h2>
-              <p class="text-2xl font-bold text-purple-400">€ ${beneficioTotal.toFixed(2)}</p>
-            </div>
-          </div>
-
-        `:""}
+        ${
+          tab==="panel"
+          ? `
+              <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen</h2>
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
+                <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-blue-500">
+                  <h2 class="text-lg text-gray-400">Invertido</h2>
+                  <p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2)}</p>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-green-500">
+                  <h2 class="text-lg text-gray-400">Vendidos</h2>
+                  <p class="text-2xl font-bold text-green-400">${vendidos}</p>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-xl border-l-4 border-purple-500">
+                  <h2 class="text-lg text-gray-400">Beneficio total</h2>
+                  <p class="text-2xl font-bold text-purple-400">€ ${beneficioTotal.toFixed(2)}</p>
+                </div>
+              </div>
+            `
+          : tab==="productos"
+          ? renderProductos()
+          : renderEstadisticas()
+        }
       `;
 
       document.getElementById("app").innerHTML = appContent;
