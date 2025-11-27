@@ -1,399 +1,225 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reventa Tracker - Sincronizado en la Nube</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reventa - Control de Productos</title>
 
-  <style>
-    /* Estilo básico para asegurar que Tailwind funcione y centrar la app */
-    body {
-        font-family: 'Inter', sans-serif;
-    }
-    /* Estilo para ocultar el formulario mientras se carga Firebase */
-    #form-container { opacity: 0; transition: opacity 0.5s; }
-    .loaded #form-container { opacity: 1; }
-  </style>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            margin: auto;
+            width: 95%;
+            max-width: 600px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 25px;
+        }
+
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #222;
+            color: white;
+        }
+
+        .edit-btn {
+            background: orange;
+            color: white;
+            padding: 8px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+        }
+    </style>
 </head>
-<!-- APLICO EL MODO OSCURO PRINCIPAL AQUÍ -->
-<body class="bg-slate-900 p-6 rounded-xl text-gray-100">
-  <div id="app" class="max-w-6xl mx-auto space-y-6"></div>
-  <div id="form-container" class="max-w-6xl mx-auto"></div> 
 
-  <!-- Todo el JavaScript ahora está en un solo bloque 'type="module"' -->
-  <script type="module">
-    // =================================================================
-    // 1. INCLUIR LIBRERÍAS DE FIREBASE (V9 modular con imports)
-    // =================================================================
+<body>
+
+    <h1>Gestión de Productos para Reventa</h1>
+
+    <div class="card">
+        <label>Nombre del producto</label>
+        <input type="text" id="nombre">
+
+        <label>Precio compra (€)</label>
+        <input type="number" id="precio">
+
+        <label>PVP venta (€)</label>
+        <input type="number" id="pvp">
+
+        <label>
+            <input type="checkbox" id="vendido"> Vendido
+        </label>
+
+        <button onclick="guardarProducto()">Guardar</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Producto</th>
+                <th>Compra</th>
+                <th>Venta</th>
+                <th>Ganancia</th>
+                <th>Vendido</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody id="tablaProductos"></tbody>
+    </table>
+
+<!-- ------------------------------------------ -->
+<!-- FIREBASE + APP COMPLETA Y CORREGIDA -->
+<!-- ------------------------------------------ -->
+
+<script type="module">
+
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-    import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, FieldValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
+    import { 
+        getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, serverTimestamp 
+    } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
-    // =================================================================
-    // CONFIGURACIÓN DE FIREBASE Y CONEXIÓN
-    // =================================================================
-    // NOTA: Reemplaza estas credenciales con las tuyas.
     const firebaseConfig = {
-        apiKey: "AIzaSyDjTf3MR6Hn6G5igOQocjLb2cW6kogaeM4",
-        authDomain: "reventa-de8be.firebaseapp.com",
-        projectId: "reventa-de8be",
-        storageBucket: "reventa-de8be.firebasestorage.app",
-        messagingSenderId: "396010674100",
-        appId: "1:396010674100:web:28532dafe6f223969404e1"
+        apiKey: "AIzaSyDqZRGrghjfwowj9ysp2CgRquw7hxUZwN0",
+        authDomain: "reventa-site.firebaseapp.com",
+        projectId: "reventa-site",
+        storageBucket: "reventa-site.appspot.com",
+        messagingSenderId: "337400989968",
+        appId: "1:337400989968:web:514bd0a716fcfe649a8cdf"
     };
 
-    let db; 
-    let COLLECTION_NAME = "productosReventa";
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
 
-    // Inicializar Firebase y Firestore
-    try {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-    } catch (error) {
-        console.error("Error al inicializar Firebase: ", error);
-        document.getElementById('app').innerHTML = `
-            <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative" role="alert">
-              <strong class="font-bold">¡Error de conexión!</strong>
-              <span class="block sm:inline">No se pudo inicializar Firebase. Revise la consola.</span>
-            </div>
-        `;
-    }
+    const productosCollection = collection(db, "productos");
 
+    let editingProductoId = null;
 
-    // =================================================================
-    // ESTADO LOCAL DE LA APLICACIÓN
-    // =================================================================
-    let productos = [];
-    let tab = "panel";
-    let editing = null;
+    // -----------------------------
+    // Cargar productos en tiempo real
+    // -----------------------------
+    onSnapshot(productosCollection, (snapshot) => {
+        const tabla = document.getElementById("tablaProductos");
+        tabla.innerHTML = "";
 
-    const emptyForm = { nombre: "", precioCompra: "", precioVenta: "", valorVenta: "", fecha: "", fechaVenta: "", notas: "" };
-    let form = { ...emptyForm };
-    
-    function setFormField(field, value) {
-      form[field] = value;
-    }
-    
-    // Función para cambiar de pestaña y re-renderizar (Nueva función clave para la navegación)
-    function setTab(newTab) {
-      tab = newTab;
-      // Si cambiamos a una pestaña que no es el panel, reseteamos/ocultamos el formulario de edición/creación
-      if (newTab !== 'panel') {
-          editing = null;
-          form = { ...emptyForm };
-      }
-      renderForm(); // Renderiza el formulario (o lo oculta si no es 'panel')
-      render();     // Renderiza el contenido principal de la pestaña
-    }
+        snapshot.forEach(docSnap => {
+            const data = docSnap.data();
 
-
-    // Normalizar precios: permite coma/punto al escribir, guarda con punto
-    function normalizePrice(priceString) {
-      if (!priceString) return "";
-      return priceString.toString().replace(/,/g, '.').replace(/[^\d.]/g, '');
-    }
-
-    // Formatea un número para mostrarlo con coma como separador decimal (ej. 148,10)
-    const formatPriceDisplay = (priceString) => {
-        const num = parseFloat(priceString);
-        if (isNaN(num)) return '-';
-        return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    };
-
-    // =================================================================
-    // LÓGICA DE CARGA Y GUARDADO (USANDO FIRESTORE)
-    // =================================================================
-
-    // Carga inicial y listener en tiempo real
-    function loadProductos() {
-      if (!db) return; 
-
-      try {
-        const colRef = collection(db, COLLECTION_NAME);
-
-        onSnapshot(colRef, (snapshot) => {
-            // Mapea los documentos de Firestore al estado local 'productos'
-            productos = snapshot.docs.map(doc => ({ 
-              id: doc.id, 
-              ...doc.data(),
-              precioCompra: doc.data().precioCompra || "",
-              precioVenta: doc.data().precioVenta || "",
-              valorVenta: doc.data().valorVenta || ""
-            }));
-
-            // Una vez cargado, muestra el formulario y la app
-            document.body.classList.add('loaded');
-            renderForm();
-            render();
-        }, (error) => {
-            console.error("Error al cargar productos en tiempo real: ", error);
-            document.getElementById('app').innerHTML = `
-                <div class="bg-red-900 border border-red-700 text-red-300 px-4 py-3 rounded relative mt-8" role="alert">
-                  <strong class="font-bold">¡Error de Permisos o Conexión!</strong>
-                  <span class="block sm:inline">No se pueden leer los datos. Verifique sus Reglas de Seguridad de Firebase.</span>
-                </div>
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td>${data.producto || ""}</td>
+                <td>${data.precio || 0}€</td>
+                <td>${data.pvp || 0}€</td>
+                <td>${data.ganancia || 0}€</td>
+                <td>${data.vendido ? "Sí" : "No"}</td>
+                <td>
+                    <button class="edit-btn" onclick="editarProducto('${docSnap.id}')">Editar</button>
+                </td>
             `;
+
+            tabla.appendChild(row);
         });
+    });
 
-      } catch (error) {
-        console.error("Error al iniciar el listener de Firestore: ", error);
-      }
-    }
+    // -----------------------------
+    // Guardar o editar producto
+    // -----------------------------
+    window.guardarProducto = async function () {
+        const nombre = document.getElementById("nombre").value.trim();
+        const precio = parseFloat(document.getElementById("precio").value) || 0;
+        const pvp = parseFloat(document.getElementById("pvp").value) || 0;
+        const vendido = document.getElementById("vendido").checked;
 
-    // Guarda o actualiza un producto en Firestore
-    async function saveProducto() {
-      if (!db) {
-         console.error("Error: La conexión a la base de datos no está activa.");
-         return;
-      }
+        const ganancia = (pvp - precio).toFixed(2);
 
-      // 1. Normalizar y validar
-      const precioCompraNormalizado = normalizePrice(form.precioCompra);
+        const data = {
+            producto: nombre,
+            precio,
+            pvp,
+            ganancia,
+            vendido,
+            updatedAt: serverTimestamp()
+        };
 
-      const productoToSave = {
-        ...form,
-        precioCompra: precioCompraNormalizado,
-        precioVenta: normalizePrice(form.precioVenta),
-        valorVenta: normalizePrice(form.valorVenta),
-      };
+        try {
 
-      if (!productoToSave.nombre || isNaN(parseFloat(precioCompraNormalizado))) {
-        // Muestra error en la UI si faltan datos esenciales
-        document.getElementById('form-error').innerHTML = '<div class="text-red-400 font-medium">❌ Debes rellenar el nombre y el precio de compra con un número válido.</div>';
-        return;
-      }
-      
-      // Limpia el mensaje de error si la validación es exitosa
-      document.getElementById('form-error').innerHTML = '';
-      
-      const isVendido = !!productoToSave.precioVenta;
-      // Añade el campo 'vendido' y la marca de tiempo de actualización (V9)
-      const dataToSave = { ...productoToSave, vendido: isVendido, updatedAt: FieldValue.serverTimestamp() };
-
-      try {
-        if (editing) {
-          // Actualizar documento existente
-          const docRef = doc(db, COLLECTION_NAME, editing);
-          await updateDoc(docRef, dataToSave);
-        } else {
-          // Añadir nuevo documento
-          await addDoc(collection(db, COLLECTION_NAME), dataToSave);
-        }
-
-        // 2. Resetear el formulario tras guardar
-        form = { ...emptyForm };
-        editing = null; 
-        renderForm(); 
-        console.log("Producto guardado con éxito.");
-
-      } catch (error) {
-        console.error("Error al guardar producto en Firestore:", error);
-        // Muestra error detallado en la UI
-        document.getElementById('form-error').innerHTML = `<div class="text-red-400 font-medium">❌ Error al guardar: ${error.message}. ¿Reglas de Seguridad?</div>`;
-      }
-    }
-
-    // Carga los datos de un producto en el formulario para editar
-    function editProducto(p) {
-      editing = p.id;
-      form = { ...p }; 
-      renderForm(); 
-      // Desplaza al formulario para empezar a editar
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-
-    // =================================================================
-    // RENDERIZADO DE LA UI
-    // =================================================================
-
-    // Renderiza el formulario de entrada/edición
-    function renderForm() {
-      const inputClasses = "border border-gray-700 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition bg-slate-700 text-white";
-      
-      const formHTML = tab === "panel" ? `
-        <div id="resale-form" class="bg-gray-800 shadow-lg rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-7 gap-4 mb-3 transition transform hover:scale-[1.01] duration-300">
-          <input class="${inputClasses}" placeholder="Producto" value="${form.nombre}" oninput="setFormField('nombre', this.value)" />
-          <input class="${inputClasses}" placeholder="Precio compra (€)" type="text" value="${form.precioCompra}" oninput="setFormField('precioCompra', this.value)" />
-          <input class="${inputClasses}" placeholder="Precio venta (€)" type="text" value="${form.precioVenta}" oninput="setFormField('precioVenta', this.value)" />
-          <input class="${inputClasses}" placeholder="Valor venta (€)" type="text" value="${form.valorVenta}" oninput="setFormField('valorVenta', this.value)" />
-          <input class="${inputClasses}" placeholder="Fecha compra" type="date" value="${form.fecha}" oninput="setFormField('fecha', this.value)" />
-          <input class="${inputClasses}" placeholder="Fecha venta" type="date" value="${form.fechaVenta}" oninput="setFormField('fechaVenta', this.value)" />
-          <input class="${inputClasses} md:col-span-2" placeholder="Notas" value="${form.notas}" oninput="setFormField('notas', this.value)" />
-          
-          <div id="form-error" class="md:col-span-7"></div> 
-          
-          <button class="w-full md:col-span-7 bg-blue-600 text-white font-semibold rounded-lg py-3 hover:bg-blue-700 transition transform hover:scale-[1.02] shadow-md" onclick="saveProducto()">${editing ? "💾 Guardar cambios" : "➕ Añadir producto"}</button>
-        </div>` : "";
-        
-      document.getElementById("form-container").innerHTML = formHTML;
-    }
-
-    // Renderiza las pestañas de resumen, tabla y estadísticas
-    function render() {
-      // Cálculos de resumen
-      const invertido = productos.reduce((acc, p) => acc + parseFloat(p.precioCompra || 0), 0);
-      const vendidos = productos.filter(p => p.vendido).length;
-      const beneficioTotal = productos.reduce((acc, p) => acc + ((parseFloat(p.precioVenta || 0) || 0) - parseFloat(p.precioCompra || 0)), 0);
-      const stock = productos.filter(p => !p.vendido).length;
-      const valorSinVender = productos.filter(p => !p.vendido).reduce((acc, p) => acc + parseFloat(p.valorVenta || 0), 0);
-      
-      const renderTabla = (lista, incluirPorcentaje = false) => {
-        
-        if (lista.length === 0) {
-            // Fondo oscuro para mensaje vacío
-            return '<p class="text-center text-gray-400 p-8 bg-gray-800 rounded-xl shadow">No hay productos registrados en esta lista. Añade uno para empezar.</p>';
-        }
-
-        return `
-        <div class="overflow-x-auto">
-          <table class="min-w-full bg-gray-800 rounded-xl shadow-lg border border-gray-700">
-            <thead class="bg-gray-700 text-gray-200">
-              <tr>
-                <th class="p-3 text-left">Producto</th>
-                <th class="p-3 text-left">Fecha compra</th>
-                <th class="p-3 text-right">Precio compra</th>
-                <th class="p-3 text-right">Precio venta</th>
-                <th class="p-3 text-left">Fecha venta</th>
-                <th class="p-3 text-center">Vendido</th>
-                <th class="p-3 text-right">Beneficio</th>
-                ${incluirPorcentaje ? `<th class="p-3 text-right">% Beneficio</th>` : ""}
-                <th class="p-3 text-left">Notas</th>
-                <th class="p-3 text-center">Editar</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${lista.map(p => {
-                const compra = parseFloat(p.precioCompra || 0);
-                const venta = parseFloat(p.precioVenta || 0);
-                const beneficio = venta - compra;
-                let porcentaje = 'N/A';
-                if (p.vendido && compra !== 0) {
-                  // Cálculo de % de beneficio: (Beneficio / Coste) * 100
-                  porcentaje = ((beneficio / compra) * 100).toFixed(1);
-                }
-                // Ajuste de colores de fila para Dark Mode
-                const rowColor = p.vendido ? 'bg-green-900/40 hover:bg-green-900/70' : 'hover:bg-red-900/40';
-
-                return `
-                  <tr class="${rowColor} border-t border-gray-700 text-gray-300">
-                    <td class="p-3">${p.nombre}</td>
-                    <td class="p-3">${p.fecha || '-'}</td>
-                    <td class="p-3 text-right text-gray-400">€ ${formatPriceDisplay(p.precioCompra)}</td>
-                    <!-- Ajuste de texto de venta -->
-                    <td class="p-3 text-right text-${p.vendido ? 'green-400' : 'red-400'} font-medium">${p.precioVenta ? '€ ' + formatPriceDisplay(p.precioVenta) : '-'}</td>
-                    <td class="p-3">${p.fechaVenta || '-'}</td>
-                    <td class="p-3 text-center">${p.vendido ? '✅ Sí' : '❌ No'}</td>
-                    <!-- Ajuste de texto de beneficio -->
-                    <td class="p-3 text-right font-semibold text-${beneficio >= 0 ? 'blue-400' : 'red-400'}">${beneficio.toFixed(2).replace('.', ',')} €</td>
-                    ${ incluirPorcentaje ? `<td class="p-3 text-right">${porcentaje === 'N/A' ? 'N/A' : porcentaje + '%'}</td>` : '' }
-                    <td class="p-3 text-sm text-gray-400 max-w-xs overflow-hidden text-ellipsis">${p.notas || '-'}</td>
-                    <td class="p-3 text-center"><button class="bg-blue-500 text-white text-sm px-3 py-1 rounded-full hover:bg-blue-600 transition shadow-sm" onclick='editProducto(${JSON.stringify(p)})'>Editar</button></td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>`;
-      };
-      
-      const appContent = `
-        <h1 class="text-4xl font-extrabold text-center text-white mb-8">📈 Reventa Tracker Cloud</h1>
-
-        <!-- Controles de pestaña: AHORA LLAMAN A setTab() -->
-        <div class="flex gap-4 justify-center p-2 rounded-xl bg-slate-800 shadow-inner">
-          <button onclick="setTab('panel')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'panel' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Panel</button>
-          <button onclick="setTab('productos')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'productos' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Mis Productos</button>
-          <button onclick="setTab('estadisticas')" class="px-5 py-2 text-lg font-medium rounded-full transition ${tab === 'estadisticas' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-300 hover:bg-slate-700'}">Estadísticas</button>
-        </div>
-
-        <!-- Contenido de las pestañas -->
-        ${tab === "panel" ? `
-        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Resumen del Inventario</h2>
-        <!-- Tarjetas de resumen ajustadas para Dark Mode (bg-gray-800, text-400) -->
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-blue-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Invertido</h2><p class="text-2xl font-bold text-blue-400">€ ${invertido.toFixed(2).replace('.', ',')}</p></div>
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-green-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Vendidos</h2><p class="text-2xl font-bold text-green-400">${vendidos}</p></div>
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-purple-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Beneficio total</h2><p class="text-2xl font-bold text-purple-400">€ ${beneficioTotal.toFixed(2).replace('.', ',')}</p></div>
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-red-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Stock</h2><p class="text-2xl font-bold text-red-400">${stock}</p></div>
-          <div class="bg-gray-800 shadow-md p-4 rounded-xl border-l-4 border-orange-500 transition hover:shadow-lg"><h2 class="text-lg text-gray-400">Valor sin vender</h2><p class="text-2xl font-bold text-orange-400">€ ${valorSinVender.toFixed(2).replace('.', ',')}</p></div>
-        </div>
-
-        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Inventario Completo</h2>
-        <div class="mt-4">${renderTabla(productos)}</div>
-        ` : ""}
-
-
-        ${tab === "productos" ? `
-          <h2 class="text-2xl font-semibold text-gray-300 mt-6">Detalle de Productos</h2>
-          ${renderTabla(productos, true)}
-        ` : ""}
-
-        ${tab === "estadisticas" ? `
-        <h2 class="text-2xl font-semibold text-gray-300 mt-6">Estadísticas Clave</h2>
-        <div class="space-y-4">
-          ${productos.length > 0 ? (() => {
-            // Lógica para encontrar el producto más rentable (SOLO productos vendidos)
-            const vendidosConBeneficio = productos
-                .filter(p => p.vendido)
-                .map(p => {
-                    // Aseguramos que los valores sean números antes de restar
-                    const beneficio = (parseFloat(p.precioVenta || 0) - parseFloat(p.precioCompra || 0));
-                    return { ...p, beneficio: beneficio };
-                });
-            
-            let mejorProducto = null;
-            if (vendidosConBeneficio.length > 0) {
-                // Ordenar para encontrar el producto con el mayor beneficio individual
-                mejorProducto = vendidosConBeneficio.sort((a, b) => b.beneficio - a.beneficio)[0];
+            if (editingProductoId) {
+                await updateDoc(doc(db, "productos", editingProductoId), data);
+            } else {
+                await addDoc(productosCollection, data);
             }
 
-            return `
-            <!-- Ajuste para Dark Mode -->
-            <div class="bg-gray-800 p-6 shadow-md rounded-xl border-l-4 border-purple-500">
-              <h2 class="text-xl font-medium text-purple-400">🥇 Producto con más beneficio (Neto Individual)</h2>
-              <p class="text-lg mt-1 font-semibold">${mejorProducto ? mejorProducto.nombre : 'No hay productos vendidos' } 
-              ${mejorProducto ? `(Beneficio: € ${mejorProducto.beneficio.toFixed(2).replace('.', ',')})` : ''}
-              </p>
-            </div>
-            
-            <!-- Ajuste para Dark Mode -->
-            <div class="bg-gray-800 p-6 shadow-md rounded-xl border-l-4 border-teal-500">
-              <h2 class="text-xl font-medium text-teal-400">⏱️ Velocidad de venta</h2>
-              ${productos.filter(p => p.vendido && p.fecha && p.fechaVenta).length ? (() => {
-                const vendidos = productos.filter(p => p.vendido && p.fecha && p.fechaVenta).map(p => {
-                  // Cálculo de días de diferencia
-                  const dias = Math.ceil((new Date(p.fechaVenta) - new Date(p.fecha)) / 86400000);
-                  return { ...p, dias };
-                });
-                const masRap = vendidos.reduce((a,b)=> a.dias<b.dias?a:b);
-                const masLen = vendidos.reduce((a,b)=> a.dias>b.dias?a:b);
-                return `<p class="mt-1 text-gray-300"><strong>🚀 Más rápido:</strong> ${masRap.nombre} (${masRap.dias} días)</p><p class="text-gray-300"><strong>🐢 Más lento:</strong> ${masLen.nombre} (${masLen.dias} días)</p>`;
-              })() : '<p class="mt-1 text-gray-500">No hay datos suficientes de ventas con fecha de compra y venta.</p>'}
-            </div>`;
-          })() : '<p class="text-center text-gray-400 p-8 bg-gray-800 rounded-xl shadow">Añade productos para ver las estadísticas.</p>'}
-        </div>` : ""}
-      `;
+            limpiarFormulario();
 
-      document.getElementById("app").innerHTML = appContent;
+        } catch (err) {
+            console.error(err);
+            alert("Error guardando producto");
+        }
+    };
+
+    // -----------------------------
+    // Editar producto
+    // -----------------------------
+    window.editarProducto = function (id) {
+        editingProductoId = id;
+
+        onSnapshot(doc(db, "productos", id), (snap) => {
+            const d = snap.data();
+
+            document.getElementById("nombre").value = d.producto;
+            document.getElementById("precio").value = d.precio;
+            document.getElementById("pvp").value = d.pvp;
+            document.getElementById("vendido").checked = d.vendido;
+        });
+    };
+
+    // -----------------------------
+    // Limpiar formulario
+    // -----------------------------
+    function limpiarFormulario() {
+        editingProductoId = null;
+
+        document.getElementById("nombre").value = "";
+        document.getElementById("precio").value = "";
+        document.getElementById("pvp").value = "";
+        document.getElementById("vendido").checked = false;
     }
 
-    // INICIO DE LA APLICACIÓN: Inicia la escucha de datos en tiempo real
-    if (typeof initializeApp !== 'undefined') {
-        loadProductos();
-    }
-    
-    // =================================================================
-    // EXPOSICIÓN GLOBAL (NECESARIO PARA ONCLICK EN HTML)
-    // =================================================================
-    // Exponemos las funciones necesarias al objeto window para que los eventos onclick del HTML puedan acceder a ellas.
-    window.setTab = setTab; // <-- Nuevo: Para manejar la navegación correctamente
-    window.render = render;
-    window.renderForm = renderForm;
-    window.saveProducto = saveProducto;
-    window.setFormField = setFormField;
-    window.editProducto = editProducto;
+</script>
 
-  </script>
 </body>
 </html>
